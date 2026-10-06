@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { apiFetch } from './api.js'
 import { authStorage } from './authStorage.js'
 
-export default function ProfileSettings({ profile, onSaved }) {
+export default function ProfileSettings({ profile, onSaved, panel }) {
   const [form, setForm] = useState({ name: profile.name || '', bio: profile.bio || '', email: profile.email || '', currentPassword: '', newPassword: '', confirmPassword: '' })
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -22,5 +22,6 @@ export default function ProfileSettings({ profile, onSaved }) {
       setForm((current) => ({ ...current, currentPassword: '', newPassword: '', confirmPassword: '' })); setMessage('비밀번호를 변경했습니다. 다음 로그인부터 새 비밀번호를 사용하세요.')
     } catch (caught) { setError(caught.message) }
   }
-  return <section id="profile-settings" className="profile-settings"><h2>프로필 편집</h2><form className="editor" onSubmit={saveProfile}><label>이름<input name="name" required value={form.name} onChange={update} /></label><label>이메일<input name="email" required type="email" value={form.email} onChange={update} /></label><label>소개<textarea name="bio" rows="3" value={form.bio} onChange={update} /></label><button className="button">프로필 저장</button></form><form id="password-settings" className="editor password-form" onSubmit={changePassword}><h3>비밀번호 변경</h3><label>현재 비밀번호<input name="currentPassword" required type="password" autoComplete="current-password" value={form.currentPassword} onChange={update} /></label><label>새 비밀번호<input name="newPassword" required minLength="8" type="password" autoComplete="new-password" value={form.newPassword} onChange={update} /></label><label>새 비밀번호 확인<input name="confirmPassword" required minLength="8" type="password" autoComplete="new-password" value={form.confirmPassword} onChange={update} /></label><button className="outline">비밀번호 변경</button></form>{(message || error) && <p className="profile-message">{message || error}</p>}</section>
+  if (!panel) return null
+  return <section id="profile-settings" className="profile-settings">{panel === 'profile' && <><h2>프로필 편집</h2><form className="editor" onSubmit={saveProfile}><label>이름<input name="name" required value={form.name} onChange={update} /></label><label>이메일<input name="email" required type="email" value={form.email} onChange={update} /></label><label>소개<textarea name="bio" rows="3" value={form.bio} onChange={update} /></label><button className="button">프로필 저장</button></form></>}{panel === 'password' && <form id="password-settings" className="editor password-form" onSubmit={changePassword}><h2>비밀번호 변경</h2><label>현재 비밀번호<input name="currentPassword" required type="password" autoComplete="current-password" value={form.currentPassword} onChange={update} /></label><label>새 비밀번호<input name="newPassword" required minLength="8" type="password" autoComplete="new-password" value={form.newPassword} onChange={update} /></label><label>새 비밀번호 확인<input name="confirmPassword" required minLength="8" type="password" autoComplete="new-password" value={form.confirmPassword} onChange={update} /></label><button className="outline">비밀번호 변경</button></form>}{(message || error) && <p className="profile-message">{message || error}</p>}</section>
 }
