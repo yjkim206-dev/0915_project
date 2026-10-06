@@ -193,7 +193,8 @@ async function handleView(id: number, request: Request) {
   const { data: view } = await db.from('post_views').select('created_at').eq('post_id', id).eq('user_id', user.id).maybeSingle()
   const recent = view && Date.now() - new Date(view.created_at).getTime() < 24 * 60 * 60 * 1000
   if (!recent) {
-    const { error: saveError } = await db.from('post_views').upsert({ post_id: id, user_id: user.id, created_at: new Date().toISOString() }, { onConflict: 'post_id,user_id' })
+    const ipAddress = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || null
+    const { error: saveError } = await db.from('post_views').upsert({ post_id: id, user_id: user.id, ip_address: ipAddress, created_at: new Date().toISOString() }, { onConflict: 'post_id,user_id' })
     if (saveError) return error(saveError.message, 500)
     const { data: updated, error: updateError } = await db.from('posts').update({ views: (post.views || 0) + 1 }).eq('id', id).select('views').single()
     if (updateError) return error(updateError.message, 500)

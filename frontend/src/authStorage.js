@@ -13,10 +13,14 @@ export const authStorage = {
       this.clear()
       return null
     }
-    // The active browser-session token must win over any older persisted token.
-    const sessionValue = sessionStorage.getItem(key)
-    if (sessionValue !== null) return sessionValue
-    return localStorage.getItem(key)
+    const persistentValue = localStorage.getItem(key)
+    if (persistentValue !== null) return persistentValue
+    const legacySessionValue = sessionStorage.getItem(key)
+    if (legacySessionValue !== null) {
+      localStorage.setItem(key, legacySessionValue)
+      sessionStorage.removeItem(key)
+    }
+    return legacySessionValue
   },
   setItem(key, value) {
     localStorage.setItem(key, value)
