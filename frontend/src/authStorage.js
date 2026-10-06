@@ -2,7 +2,10 @@ const keys = ['token', 'userId', 'adminToken', 'authExpiresAt']
 export const SESSION_DURATION_MS = 24 * 60 * 60 * 1000
 
 const expiration = () => Number(localStorage.getItem('authExpiresAt') || sessionStorage.getItem('authExpiresAt') || 0)
-const expired = () => expiration() <= Date.now()
+const expired = () => {
+  const expiresAt = expiration()
+  return expiresAt > 0 && expiresAt <= Date.now()
+}
 
 export const authStorage = {
   getItem(key) {
@@ -10,11 +13,10 @@ export const authStorage = {
       this.clear()
       return null
     }
-    const value = localStorage.getItem(key)
-    if (value !== null) return value
-    const legacyValue = sessionStorage.getItem(key)
-    if (legacyValue !== null) localStorage.setItem(key, legacyValue)
-    return legacyValue
+    // The active browser-session token must win over any older persisted token.
+    const sessionValue = sessionStorage.getItem(key)
+    if (sessionValue !== null) return sessionValue
+    return localStorage.getItem(key)
   },
   setItem(key, value) {
     localStorage.setItem(key, value)
