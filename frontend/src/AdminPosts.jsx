@@ -1,128 +1,49 @@
 import { useEffect, useState } from 'react'
-import AdminComments from './AdminComments.jsx'
+import { Link } from 'react-router-dom'
+import { authStorage } from './authStorage.js'
+import { apiFetch } from './api.js'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
-const emptyForm = { title: '', content: '', category: '자유' }
-
-function formatDate(value) { return value ? new Date(value).toLocaleDateString('ko-KR') : '-' }
+const headers = () => ({ Authorization: 'Bearer ' + authStorage.getItem('adminToken') })
+const date = (value) => value ? new Date(value).toLocaleDateString('ko-KR') : '-'
+const emptyMetrics = { posts: 0, comments: 0, users: 0, views: 0 }
 
 export default function AdminPosts() {
+  const [tab, setTab] = useState('dashboard')
   const [posts, setPosts] = useState([])
-  const [form, setForm] = useState(emptyForm)
-  const [editingId, setEditingId] = useState(null)
-  const [editorOpen, setEditorOpen] = useState(false)
+  const [comments, setComments] = useState([])
+  const [metrics, setMetrics] = useState(emptyMetrics)
+  const [reports, setReports] = useState([])
+  const [settings, setSettings] = useState({ site_name: '', site_description: '', maintenance_mode: 'false' })
   const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
   const [loading, setLoading] = useState(true)
-  const token = sessionStorage.getItem('adminToken')
 
-  const loadPosts = async () => {
-    setLoading(true)
+  const load = async () => {
+    setLoading(true); setError('')
     try {
-      const response = await fetch(`${API}/admin/posts`, { headers: { Authorization: `Bearer ${token}` } })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message)
-      setPosts(data)
-    } catch (requestError) {
-      setError(requestError.message || '게시글 목록을 불러오지 못했습니다.')
-    } finally {
-      setLoading(false)
-    }
+      const [dashboard, reportData, settingData] = await Promise.all([
+        apiFetch('/admin/dashboard', { headers: headers() }),
+        apiFetch('/admin/reports', { headers: headers() }),
+        apiFetch('/admin/settings', { headers: headers() }),
+      ])
+      setMetrics(dashboard.metrics || emptyMetrics)
+      setPosts(dashboard.recentPosts || [])
+      setComments(dashboard.recentComments || [])
+      setReports(reportData || [])
+      setSettings(Object.fromEntries((settingData || []).map((item) => [item.key, item.value])))
+    } catch (caught) { setError(caught.message) } finally { setLoading(false) }
   }
+  useEffect(() => { load() }, [])
+  const updateReport = async (id, status) => { try { const data = await apiFetch('/admin/reports/' + id, { method: 'PATCH', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }); setReports((items) => items.map((item) => item.id === id ? { ...item, ...data } : item)) } catch (caught) { setError(caught.message) } }
+  const saveSettings = async (event) => { event.preventDefault(); try { const data = await apiFetch('/admin/settings', { method: 'PATCH', headers: { ...headers(), 'Content-Type': 'application/json' }, body: JSON.stringify(settings) }); setSettings(Object.fromEntries(data.map((item) => [item.key, item.value]))); setError('Settings saved.') } catch (caught) { setError(caught.message) } }
+  const logout = () => { authStorage.removeItem('adminToken'); window.location.href = '/admin/login' }
+  const pending = reports.filter((item) => item.status === 'pending').length
 
-  useEffect(() => { loadPosts() }, [])
-
-  const updateForm = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
-
-  const startCreate = () => {
-    setEditingId(null)
-    setEditorOpen(true)
-    setForm(emptyForm)
-    setError('')
-    setMessage('')
-  }
-
-  const startEdit = (post) => {
-    setEditingId(post.id)
-    setEditorOpen(true)
-    setForm({ title: post.title, content: post.content, category: post.category || '자유' })
-    setError('')
-    setMessage('')
-  }
-
-  const cancelEdit = () => {
-    setEditingId(null)
-    setEditorOpen(false)
-    setForm(emptyForm)
-    setError('')
-  }
-
-  const save = async (event) => {
-    event.preventDefault()
-    setError('')
-    setMessage('')
-    const isEditing = editingId !== null
-    try {
-      const response = await fetch(`${API}/admin/posts${isEditing ? `/${editingId}` : ''}`, {
-        method: isEditing ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(form),
-      })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message)
-      if (isEditing) setPosts((current) => current.map((post) => post.id === data.id ? { ...post, ...data } : post))
-      else setPosts((current) => [data, ...current])
-      setMessage(isEditing ? '게시글이 수정되었습니다.' : '게시글이 등록되었습니다.')
-      setEditingId(null)
-      setEditorOpen(false)
-      setForm(emptyForm)
-    } catch (requestError) {
-      setError(requestError.message || '게시글을 저장하지 못했습니다.')
-    }
-  }
-
-  const toggleVisibility = async (post) => {
-    setError('')
-    try {
-      const response = await fetch(`${API}/admin/posts/${post.id}/visibility`, { method: 'PATCH', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ hidden: !post.is_hidden }) })
-      const data = await response.json()
-      if (!response.ok) throw new Error(data.message)
-      setPosts((current) => current.map((item) => item.id === post.id ? { ...item, is_hidden: data.is_hidden } : item))
-    } catch (requestError) {
-      setError(requestError.message || '게시 상태를 변경하지 못했습니다.')
-    }
-  }
-
-  const remove = async (post) => {
-    if (!window.confirm('이 게시글을 삭제할까요?')) return
-    setError('')
-    try {
-      const response = await fetch(`${API}/admin/posts/${post.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
-      if (!response.ok) {
-        const data = await response.json()
-        throw new Error(data.message)
-      }
-      setPosts((current) => current.filter((item) => item.id !== post.id))
-      if (editingId === post.id) cancelEdit()
-      setMessage('게시글이 삭제되었습니다.')
-    } catch (requestError) {
-      setError(requestError.message || '게시글을 삭제하지 못했습니다.')
-    }
-  }
-
-  return <><section className="admin-posts-page">
-    <div className="admin-topbar"><div><p className="admin-kicker">POSTS</p><h1>게시글 관리</h1></div><div className="admin-posts-toolbar"><span className="admin-date">전체 {posts.length}개</span><button type="button" className="admin-button" onClick={startCreate}>+ 새 글 작성</button></div></div>
-    {(error || message) && <p className={error ? 'admin-posts-error' : 'admin-posts-message'}>{error || message}</p>}
-    {editorOpen && <form className="admin-post-editor" onSubmit={save}>
-      <h2>{editingId === null ? '새 글 작성' : '글 수정'}</h2>
-      <label>카테고리<select name="category" value={form.category} onChange={updateForm}><option>자유</option><option>개발</option><option>모임</option></select></label>
-      <label>제목<input name="title" value={form.title} onChange={updateForm} maxLength="120" required /></label>
-      <label>내용<textarea name="content" value={form.content} onChange={updateForm} rows="8" maxLength="10000" required /></label>
-      <div className="admin-post-editor-actions"><button type="button" className="admin-post-cancel" onClick={cancelEdit}>취소</button><button className="admin-button">{editingId === null ? '게시하기' : '수정 저장'}</button></div>
-    </form>}
-    <div className="admin-posts-table">
-      <div className="admin-posts-table-head"><span>제목</span><span>작성자</span><span>카테고리</span><span>작성일</span><span>상태 · 조회</span><span>관리</span></div>
-      {loading ? <p className="empty">게시글을 불러오는 중...</p> : posts.length ? posts.map((post) => <div className={`admin-post-row${post.is_hidden ? ' is-hidden' : ''}`} key={post.id}><strong>{post.title}</strong><span>{post.author || '알 수 없음'}</span><span className="category">{post.category || '자유'}</span><span>{formatDate(post.created_at)}</span><span>{post.is_hidden ? '비공개' : '공개'} · {post.views ?? 0}회</span><div className="admin-post-actions"><button type="button" onClick={() => startEdit(post)}>수정</button><button type="button" onClick={() => toggleVisibility(post)}>{post.is_hidden ? '공개' : '비공개'}</button><button type="button" className="delete" onClick={() => remove(post)}>삭제</button></div></div>) : <p className="empty">등록된 게시글이 없습니다.</p>}
-    </div>
-  </section><AdminComments /></>
+  return <section className="admin-dashboard">
+    <div className="admin-topbar"><div><p className="admin-kicker">ADMIN CENTER</p><h1>Dashboard</h1><p className="admin-subtitle">Manage your community in one place.</p></div><div className="admin-dashboard-actions"><Link to="/" className="admin-home">View site</Link><button className="admin-logout-top" onClick={logout}>Log out</button></div></div>
+    <div className="admin-tabs"><button className={tab === 'dashboard' ? 'selected' : ''} onClick={() => setTab('dashboard')}>Dashboard</button><button className={tab === 'reports' ? 'selected' : ''} onClick={() => setTab('reports')}>Reports <b>{pending}</b></button><button className={tab === 'settings' ? 'selected' : ''} onClick={() => setTab('settings')}>Settings</button></div>
+    {error && <p className="admin-posts-message">{error}</p>}
+    {tab === 'dashboard' && <><div className="dashboard-metrics"><div><small>Posts</small><strong>{metrics.posts}</strong></div><div><small>Comments</small><strong>{metrics.comments}</strong></div><div><small>Users</small><strong>{metrics.users}</strong></div><div><small>Total views</small><strong>{metrics.views}</strong></div></div><div className="dashboard-grid"><section className="dashboard-panel"><h2>Recent posts</h2>{loading ? <p className="dashboard-empty">Loading...</p> : posts.map((post) => <Link className="dashboard-post" to={'/board/' + post.id} key={post.id}><span className="dashboard-dot" /><div><strong>{post.title}</strong><small>{post.author || 'User'} · {date(post.created_at)}</small></div><em>{post.views || 0} views</em></Link>)}</section><section className="dashboard-panel"><h2>Recent comments</h2>{comments.map((comment) => <div className="dashboard-comment" key={comment.id}><strong>{comment.author || 'User'}</strong><p>{comment.content}</p><small>{date(comment.created_at)}</small></div>)}</section></div></>}
+    {tab === 'reports' && <section className="dashboard-panel admin-report-panel"><div className="dashboard-panel-head"><div><h2>Report management</h2><p>Review reported posts and comments.</p></div><button onClick={load}>Refresh</button></div>{reports.length ? reports.map((report) => <div className="admin-report-row" key={report.id}><div><strong>{report.target_type} #{report.target_id}</strong><p>{report.reason}</p><small>Reported by {report.reporter || 'User'} · {date(report.created_at)}</small></div><select value={report.status} onChange={(event) => updateReport(report.id, event.target.value)}><option value="pending">Pending</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option></select></div>) : <p className="dashboard-empty">No reports.</p>}</section>}
+    {tab === 'settings' && <form className="dashboard-panel admin-settings" onSubmit={saveSettings}><h2>Site settings</h2><label>Site name<input value={settings.site_name || ''} onChange={(event) => setSettings({ ...settings, site_name: event.target.value })} /></label><label>Description<textarea rows="4" value={settings.site_description || ''} onChange={(event) => setSettings({ ...settings, site_description: event.target.value })} /></label><label className="setting-check"><input type="checkbox" checked={settings.maintenance_mode === 'true'} onChange={(event) => setSettings({ ...settings, maintenance_mode: String(event.target.checked) })} /> Maintenance mode</label><button className="admin-button">Save settings</button></form>}
+  </section>
 }

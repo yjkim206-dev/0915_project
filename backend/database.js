@@ -18,6 +18,7 @@ db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, password TEXT NOT NULL, bio TEXT DEFAULT '', profile_image TEXT DEFAULT '', created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
   db.run(`ALTER TABLE users ADD COLUMN bio TEXT DEFAULT ''`, () => {});
   db.run(`ALTER TABLE users ADD COLUMN profile_image TEXT DEFAULT ''`, () => {});
+  db.run(`ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'`, () => {});
   db.run(`CREATE TABLE IF NOT EXISTS posts (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL, content TEXT NOT NULL, category TEXT DEFAULT '자유', author_id INTEGER, views INTEGER DEFAULT 0, created_at DATETIME DEFAULT CURRENT_TIMESTAMP, FOREIGN KEY (author_id) REFERENCES users(id))`);
   db.run(`ALTER TABLE posts ADD COLUMN category TEXT DEFAULT '자유'`, () => {});
   db.run(`ALTER TABLE posts ADD COLUMN is_hidden INTEGER DEFAULT 0`, () => {});

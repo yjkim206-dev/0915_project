@@ -8,6 +8,7 @@ const db = require('./database');
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SESSION_SECRET = process.env.SESSION_SECRET || 'moa-local-session-secret-change-in-production';
+const SESSION_DURATION_MS = 24 * 60 * 60 * 1000;
 
 app.use(cors({ origin: process.env.FRONTEND_ORIGIN || true }));
 app.use(express.json({ limit: '4mb' }));
@@ -29,10 +30,11 @@ const verifyPassword = (password, stored) => {
   return actualBuffer.length === expectedBuffer.length && crypto.timingSafeEqual(actualBuffer, expectedBuffer);
 };
 const createSession = (user) => {
-  const payload = Buffer.from(JSON.stringify({ ...user, exp: Date.now() + 7 * 24 * 60 * 60 * 1000 })).toString('base64url');
+  const issuedAt = Date.now();
+  const payload = Buffer.from(JSON.stringify({ ...user, iat: issuedAt, exp: issuedAt + SESSION_DURATION_MS })).toString('base64url');
   const signature = crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
   const token = `${payload}.${signature}`;
-  sessions.set(token, user);
+  sessions.set(token, { user, expiresAt: issuedAt + SESSION_DURATION_MS });
   return token;
 };
 const readSession = (token) => {
@@ -43,8 +45,9 @@ const readSession = (token) => {
   if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
   try {
     const user = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
-    if (!user.exp || user.exp < Date.now()) return null;
-    const { exp, ...sessionUser } = user;
+    // Require an issuance time so tokens created before the 24-hour policy do not remain valid.
+    if (!user.iat || !user.exp || user.exp < Date.now() || user.exp - user.iat > SESSION_DURATION_MS) return null;
+    const { iat, exp, ...sessionUser } = user;
     return sessionUser;
   } catch {
     return null;
@@ -52,7 +55,13 @@ const readSession = (token) => {
 };
 const getAuthUser = (req) => {
   const token = req.get('authorization')?.replace(/^Bearer\s+/i, '');
-  return token && (sessions.get(token) || readSession(token));
+  if (!token) return null;
+  const storedSession = sessions.get(token);
+  if (storedSession) {
+    if (storedSession.expiresAt > Date.now()) return storedSession.user;
+    sessions.delete(token);
+  }
+  return readSession(token);
 };
 const requireAuth = (req, res, next) => {
   const user = getAuthUser(req);
@@ -165,6 +174,40 @@ app.put('/api/admin/account', requireAdmin, (req, res) => {
   });
 });
 
+app.get('/api/admin/users', requireAdmin, (req, res) => {
+  db.all('SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC', (error, users) => {
+    if (error) return res.status(500).json({ message: '사용자 목록을 불러오지 못했습니다.' });
+    db.get('SELECT id, name, email, updated_at AS created_at FROM admin_account WHERE id = 1', (adminError, admin) => {
+      if (adminError) return res.status(500).json({ message: '관리자 계정을 불러오지 못했습니다.' });
+      const adminRow = admin ? [{ id: 'admin-1', name: admin.name, email: admin.email, role: 'admin', created_at: admin.created_at || admin.updated_at }] : [];
+      return res.json([...adminRow, ...(users || []).map((user) => ({ ...user, role: user.role === 'admin' ? 'admin' : 'user' }))]);
+    });
+  });
+});
+
+app.patch('/api/admin/users/:id', requireAdmin, (req, res) => {
+  const role = req.body.role === 'admin' ? 'admin' : req.body.role === 'user' ? 'user' : '';
+  if (!role) return res.status(400).json({ message: '유효한 권한을 선택해주세요.' });
+  if (String(req.params.id) === 'admin-1') return res.status(400).json({ message: '기본 관리자 계정의 권한은 변경할 수 없습니다.' });
+  db.run('UPDATE users SET role = ? WHERE id = ?', [role, req.params.id], function (error) {
+    if (error) return res.status(500).json({ message: '사용자 권한을 변경하지 못했습니다.' });
+    if (!this.changes) return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
+    db.get('SELECT id, name, email, role, created_at FROM users WHERE id = ?', [req.params.id], (readError, user) => {
+      if (readError || !user) return res.status(500).json({ message: '변경된 사용자를 불러오지 못했습니다.' });
+      return res.json(user);
+    });
+  });
+});
+
+app.delete('/api/admin/users/:id', requireAdmin, (req, res) => {
+  if (String(req.params.id) === 'admin-1') return res.status(400).json({ message: '기본 관리자 계정은 삭제할 수 없습니다.' });
+  db.run('DELETE FROM users WHERE id = ?', [req.params.id], function (error) {
+    if (error) return res.status(500).json({ message: '사용자를 삭제하지 못했습니다.' });
+    if (!this.changes) return res.status(404).json({ message: '사용자를 찾을 수 없습니다.' });
+    return res.status(204).send();
+  });
+});
+
 app.get('/api/posts', (req, res) => {
   db.all(`SELECT posts.id, posts.title, posts.content, posts.author_id, posts.views, posts.category, posts.created_at,
     (SELECT COUNT(*) FROM post_reactions WHERE post_id = posts.id AND reaction = 'like') AS likes,
@@ -173,6 +216,25 @@ app.get('/api/posts', (req, res) => {
     FROM posts LEFT JOIN users ON users.id = posts.author_id WHERE posts.is_hidden = 0 ORDER BY posts.created_at DESC`, (error, posts) => {
     if (error) return res.status(500).json({ message: '게시글을 불러오지 못했습니다.' });
     return res.json(posts.map((post) => ({ ...post, author: post.author || '알 수 없음', category: post.category || '자유' })));
+  });
+});
+
+app.get('/api/admin/dashboard', requireAdmin, (req, res) => {
+  db.get('SELECT COUNT(*) AS posts, COALESCE(SUM(views), 0) AS views FROM posts', (postError, postStats) => {
+    if (postError) return res.status(500).json({ message: 'Unable to load dashboard statistics.' });
+    db.get('SELECT COUNT(*) AS comments FROM comments', (commentError, commentStats) => {
+      if (commentError) return res.status(500).json({ message: 'Unable to load dashboard statistics.' });
+      db.get('SELECT COUNT(*) AS users FROM users', (userError, userStats) => {
+        if (userError) return res.status(500).json({ message: 'Unable to load dashboard statistics.' });
+        db.all(`SELECT posts.id, posts.title, posts.views, posts.created_at, CASE WHEN posts.author_id IS NULL THEN (SELECT name FROM admin_account WHERE id = 1) ELSE users.name END AS author FROM posts LEFT JOIN users ON users.id = posts.author_id ORDER BY posts.created_at DESC LIMIT 6`, (recentPostError, recentPosts) => {
+          if (recentPostError) return res.status(500).json({ message: 'Unable to load recent posts.' });
+          db.all('SELECT comments.id, comments.content, comments.created_at, users.name AS author FROM comments LEFT JOIN users ON users.id = comments.author_id ORDER BY comments.created_at DESC LIMIT 6', (recentCommentError, recentComments) => {
+            if (recentCommentError) return res.status(500).json({ message: 'Unable to load recent comments.' });
+            return res.json({ metrics: { posts: postStats.posts, comments: commentStats.comments, users: userStats.users, views: postStats.views }, recentPosts, recentComments });
+          });
+        });
+      });
+    });
   });
 });
 
