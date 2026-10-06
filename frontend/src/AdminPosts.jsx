@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { authStorage } from './authStorage.js'
 import { apiFetch } from './api.js'
+import './admin-modern.css'
 
 const headers = () => ({ Authorization: `Bearer ${authStorage.getItem('adminToken')}` })
 const date = (value) => value ? new Date(value).toLocaleDateString('ko-KR') : '-'
