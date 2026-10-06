@@ -379,6 +379,20 @@ async function handleInquiries(path: string, method: string, request: Request) {
     if (readError) return error(readError.message, 500)
     return json(data || [])
   }
+  const match = path.match(/^\/inquiries\/(\d+)$/)
+  if (match && (method === 'PUT' || method === 'DELETE')) {
+    const id = Number(match[1])
+    const { data: inquiry } = await db.from('inquiries').select('id,user_id,status').eq('id', id).single()
+    if (!inquiry) return error('문의를 찾을 수 없습니다.', 404)
+    if (inquiry.user_id !== user.id) return error('작성자만 문의를 변경할 수 있습니다.', 403)
+    if (inquiry.status === 'answered' || inquiry.status === 'closed') return error('답변이 완료된 문의는 변경할 수 없습니다.', 409)
+    if (method === 'DELETE') { const { error: deleteError } = await db.from('inquiries').delete().eq('id', id); if (deleteError) return error(deleteError.message, 500); return new Response(null, { status: 204, headers }) }
+    const input = await bodyOf(request); const content = String(input.content || '').trim()
+    if (!content || content.length > 5000) return error('문의 내용은 1자 이상 5000자 이하로 작성해주세요.')
+    const { data, error: updateError } = await db.from('inquiries').update({ content, updated_at: new Date().toISOString() }).eq('id', id).select().single()
+    if (updateError) return error(updateError.message, 500)
+    return json(data)
+  }
   return null
 }
 
@@ -395,6 +409,20 @@ async function handleReports(path: string, method: string, request: Request) {
     const { data, error: readError } = await db.from('reports').select('id,target_type,target_id,reason,status,created_at,updated_at').eq('reporter_id', user.id).order('created_at', { ascending: false })
     if (readError) return error(readError.message, 500)
     return json(data || [])
+  }
+  const match = path.match(/^\/reports\/(\d+)$/)
+  if (match && (method === 'PUT' || method === 'DELETE')) {
+    const user = await requiredUser(request); const id = Number(match[1])
+    const { data: report } = await db.from('reports').select('id,reporter_id,status').eq('id', id).single()
+    if (!report) return error('신고를 찾을 수 없습니다.', 404)
+    if (report.reporter_id !== user.id) return error('작성자만 신고를 변경할 수 있습니다.', 403)
+    if (report.status !== 'pending') return error('처리 중인 신고는 변경할 수 없습니다.', 409)
+    if (method === 'DELETE') { const { error: deleteError } = await db.from('reports').delete().eq('id', id); if (deleteError) return error(deleteError.message, 500); return new Response(null, { status: 204, headers }) }
+    const input = await bodyOf(request); const reason = String(input.reason || '').trim()
+    if (!reason || reason.length > 1000) return error('신고 내용을 확인해주세요.')
+    const { data, error: updateError } = await db.from('reports').update({ reason, updated_at: new Date().toISOString() }).eq('id', id).select().single()
+    if (updateError) return error(updateError.message, 500)
+    return json(data)
   }
   if (path !== '/reports' || method !== 'POST') return null
   const user = await requiredUser(request); const input = await bodyOf(request)
