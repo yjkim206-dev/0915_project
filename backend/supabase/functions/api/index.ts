@@ -226,6 +226,27 @@ async function handleComments(path: string, method: string, request: Request) {
 
 async function handleAdmin(path: string, method: string, request: Request) {
   const { profile } = await adminUser(request)
+  if (path === '/admin/dashboard' && method === 'GET') {
+    const [{ data: posts }, { data: comments }, { data: users }, { data: views }, { data: reactions }] = await Promise.all([
+      db.from('posts').select('created_at,views'),
+      db.from('comments').select('created_at'),
+      db.from('profiles').select('created_at'),
+      db.from('post_views').select('created_at'),
+      db.from('post_reactions').select('created_at,reaction'),
+    ])
+    const now = Date.now()
+    const ranges: Record<string, number> = { day: 1, week: 7, month: 30, quarter: 90, year: 365 }
+    const inRange = (value: string, days: number) => now - new Date(value).getTime() <= days * 86400000
+    const build = (days: number) => {
+      const postRows = (posts || []).filter((row) => inRange(row.created_at, days))
+      const commentRows = (comments || []).filter((row) => inRange(row.created_at, days))
+      const userRows = (users || []).filter((row) => inRange(row.created_at, days))
+      const viewRows = (views || []).filter((row) => inRange(row.created_at, days))
+      const reactionRows = (reactions || []).filter((row) => inRange(row.created_at, days))
+      return { posts: postRows.length, comments: commentRows.length, users: userRows.length, views: viewRows.length, likes: reactionRows.filter((row) => row.reaction === 'like').length, dislikes: reactionRows.filter((row) => row.reaction === 'dislike').length }
+    }
+    return json({ metrics: { posts: (posts || []).length, comments: (comments || []).length, users: (users || []).length, views: (posts || []).reduce((sum, row) => sum + (row.views || 0), 0) }, periods: Object.fromEntries(Object.entries(ranges).map(([key, days]) => [key, build(days)])) })
+  }
   if (path === '/admin/notices' && method === 'GET') {
     const { data, error: readError } = await db.from('notices').select('*').order('published_at', { ascending: false })
     if (readError) return error(readError.message, 500)
