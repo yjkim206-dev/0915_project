@@ -226,6 +226,18 @@ async function handleComments(path: string, method: string, request: Request) {
 
 async function handleAdmin(path: string, method: string, request: Request) {
   const { profile } = await adminUser(request)
+  if (path === '/admin/notices' && method === 'GET') {
+    const { data, error: readError } = await db.from('notices').select('*').order('published_at', { ascending: false })
+    if (readError) return error(readError.message, 500)
+    return json(data || [])
+  }
+  if (path === '/admin/notices' && method === 'POST') {
+    const input = await bodyOf(request); const title = String(input.title || '').trim(); const content = String(input.content || '').trim()
+    if (!title || !content) return error('공지 제목과 내용을 입력해주세요.')
+    const { data, error: insertError } = await db.from('notices').insert({ title, content, created_by: profile.id, is_published: true, show_as_modal: true }).select().single()
+    if (insertError) return error(insertError.message, 500)
+    return json(data, 201)
+  }
   if (path === '/admin/dashboard' && method === 'GET') {
     const [postsCount, commentsCount, usersCount, views, recentPosts, recentComments] = await Promise.all([
       db.from('posts').select('*', { count: 'exact', head: true }),
@@ -348,6 +360,13 @@ async function handleInquiries(path: string, method: string, request: Request) {
   return null
 }
 
+async function handleNotices(path: string, method: string) {
+  if (path !== '/notices' || method !== 'GET') return null
+  const { data, error: readError } = await db.from('notices').select('id,title,content,published_at,show_as_modal').eq('is_published', true).order('published_at', { ascending: false })
+  if (readError) return error(readError.message, 500)
+  return json(data || [])
+}
+
 async function handleReports(path: string, method: string, request: Request) {
   if (path === '/reports' && method === 'GET') {
     const user = await requiredUser(request)
@@ -405,6 +424,7 @@ async function handler(request: Request) {
     const reactionMatch = path.match(/^\/posts\/(\d+)\/reactions$/); if (reactionMatch && (method === 'GET' || method === 'POST')) return handleReactions(Number(reactionMatch[1]), method, request)
     const commentsResult = await handleComments(path, method, request); if (commentsResult) return commentsResult
     const inquiriesResult = path.startsWith('/inquiries') ? await handleInquiries(path, method, request) : null; if (inquiriesResult) return inquiriesResult
+    const noticesResult = await handleNotices(path, method); if (noticesResult) return noticesResult
     const reportsResult = path.startsWith('/reports') ? await handleReports(path, method, request) : null; if (reportsResult) return reportsResult
     const adminUsersResult = path.startsWith('/admin/users') ? await handleAdminUsers(path, method, request) : null; if (adminUsersResult) return adminUsersResult
     const adminResult = path.startsWith('/admin/') ? await handleAdmin(path, method, request) : null; if (adminResult) return adminResult
