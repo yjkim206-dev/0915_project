@@ -95,9 +95,12 @@ async function handleAuth(path: string, request: Request) {
     const password = String(input.password || '')
     const name = String(input.name || '').trim()
     if (!name || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) return error('이름, 올바른 이메일, 8자 이상의 비밀번호를 입력해주세요.')
-    const { data: created, error: createError } = await db.auth.admin.createUser({ email, password, email_confirm: true, user_metadata: { name } })
+    // Supabase Auth owns account creation, so the account is visible in
+    // Dashboard > Authentication > Users and database triggers can synchronize it.
+    const { data: created, error: createError } = await auth.auth.signUp({ email, password, options: { data: { name } } })
     if (createError || !created.user) return error(createError?.message || '회원가입에 실패했습니다.', createError?.status || 409)
     await ensureProfile(created.user, name)
+    if (!created.session) return error('Email confirmation is required before logging in.', 403)
     const { data: signed, error: signError } = await auth.auth.signInWithPassword({ email, password })
     if (signError || !signed.session) return error(signError?.message || '로그인 세션을 만들지 못했습니다.', 401)
     return json({ token: signed.session.access_token, user: { id: created.user.id, name, email } }, 201)
