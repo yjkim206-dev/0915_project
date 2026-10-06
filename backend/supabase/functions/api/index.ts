@@ -3,6 +3,9 @@ import { createClient, type SupabaseClient, type User } from 'jsr:@supabase/supa
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const configuredAdminName = Deno.env.get('ADMIN_NAME')?.trim() || ''
+const configuredAdminEmail = Deno.env.get('ADMIN_EMAIL')?.trim().toLowerCase() || ''
+const configuredAdminPassword = Deno.env.get('ADMIN_PASSWORD') || ''
 const db = createClient(supabaseUrl, serviceRoleKey)
 const auth = createClient(supabaseUrl, anonKey)
 
@@ -57,6 +60,24 @@ async function adminUser(request: Request) {
   return { user, profile: data }
 }
 
+async function provisionConfiguredAdmin() {
+  if (!configuredAdminEmail || !configuredAdminPassword) return
+  const { data: listed, error: listError } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 })
+  if (listError) throw listError
+  let user = listed.users.find((item) => item.email?.toLowerCase() === configuredAdminEmail)
+  if (!user) {
+    const { data, error: createError } = await db.auth.admin.createUser({ email: configuredAdminEmail, password: configuredAdminPassword, email_confirm: true, user_metadata: { name: configuredAdminName || '관리자' } })
+    if (createError || !data.user) throw createError || new Error('관리자 계정을 만들지 못했습니다.')
+    user = data.user
+  } else {
+    const { error: updateError } = await db.auth.admin.updateUserById(user.id, { password: configuredAdminPassword, email_confirm: true, user_metadata: { name: configuredAdminName || '관리자' } })
+    if (updateError) throw updateError
+  }
+  await ensureProfile(user, configuredAdminName || undefined)
+  const { error: roleError } = await db.from('profiles').update({ role: 'admin', name: configuredAdminName || undefined }).eq('id', user.id)
+  if (roleError) throw roleError
+}
+
 function postPayload(post: any) { return { ...post, is_hidden: Boolean(post.is_hidden), author: post.author || '알 수 없음', category: post.category || '자유' } }
 
 async function listPosts(admin = false) {
@@ -91,6 +112,7 @@ async function handleAuth(path: string, request: Request) {
 }
 
 async function handleAdminLogin(request: Request) {
+  await provisionConfiguredAdmin()
   const input = await bodyOf(request)
   const email = String(input.email || '').trim().toLowerCase()
   const { data, error: signError } = await auth.auth.signInWithPassword({ email, password: String(input.password || '') })
