@@ -326,6 +326,17 @@ async function handleInquiries(path: string, method: string, request: Request) {
   return null
 }
 
+async function handleReports(path: string, method: string, request: Request) {
+  if (path !== '/reports' || method !== 'POST') return null
+  const user = await requiredUser(request); const input = await bodyOf(request)
+  const targetType = input.targetType === 'comment' ? 'comment' : input.targetType === 'post' ? 'post' : ''
+  const targetId = Number(input.targetId); const reason = String(input.reason || '').trim()
+  if (!targetType || !Number.isInteger(targetId) || targetId < 1 || !reason || reason.length > 1000) return error('신고 내용을 확인해주세요.')
+  const { data, error: insertError } = await db.from('reports').insert({ reporter_id: user.id, target_type: targetType, target_id: targetId, reason }).select().single()
+  if (insertError) return error(insertError.message, 500)
+  return json(data, 201)
+}
+
 async function handleAdminUsers(path: string, method: string, request: Request) {
   const { profile } = await adminUser(request)
   if (path === '/admin/users' && method === 'GET') {
@@ -366,6 +377,7 @@ async function handler(request: Request) {
     const reactionMatch = path.match(/^\/posts\/(\d+)\/reactions$/); if (reactionMatch && (method === 'GET' || method === 'POST')) return handleReactions(Number(reactionMatch[1]), method, request)
     const commentsResult = await handleComments(path, method, request); if (commentsResult) return commentsResult
     const inquiriesResult = path.startsWith('/inquiries') ? await handleInquiries(path, method, request) : null; if (inquiriesResult) return inquiriesResult
+    const reportsResult = path.startsWith('/reports') ? await handleReports(path, method, request) : null; if (reportsResult) return reportsResult
     const adminUsersResult = path.startsWith('/admin/users') ? await handleAdminUsers(path, method, request) : null; if (adminUsersResult) return adminUsersResult
     const adminResult = path.startsWith('/admin/') ? await handleAdmin(path, method, request) : null; if (adminResult) return adminResult
     const postsResult = await handlePosts(path, method, request); if (postsResult) return postsResult
