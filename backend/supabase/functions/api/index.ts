@@ -260,6 +260,17 @@ async function handleAdmin(path: string, method: string, request: Request) {
     if (insertError) return error(insertError.message, 500)
     return json(data, 201)
   }
+  const noticeMatch = path.match(/^\/admin\/notices\/(\d+)$/)
+  if (noticeMatch && method === 'PATCH') {
+    const input = await bodyOf(request)
+    const changes: Record<string, boolean> = {}
+    if (typeof input.published === 'boolean') changes.is_published = input.published
+    if (typeof input.showAsModal === 'boolean') changes.show_as_modal = input.showAsModal
+    if (!Object.keys(changes).length) return error('변경할 공개 설정을 입력해주세요.')
+    const { data, error: updateError } = await db.from('notices').update(changes).eq('id', Number(noticeMatch[1])).select().single()
+    if (updateError) return error(updateError.message, 500)
+    return json(data)
+  }
   if (path === '/admin/dashboard' && method === 'GET') {
     const [postsCount, commentsCount, usersCount, views, recentPosts, recentComments] = await Promise.all([
       db.from('posts').select('*', { count: 'exact', head: true }),
@@ -291,7 +302,9 @@ async function handleAdmin(path: string, method: string, request: Request) {
   if (inquiryMatch && method === 'PATCH') {
     const input = await bodyOf(request); const status = String(input.status || ''); const answer = String(input.answer || '')
     if (!['received', 'in_progress', 'answered', 'closed'].includes(status)) return error('올바른 문의 상태가 아닙니다.')
-    const { data, error: updateError } = await db.from('inquiries').update({ status, answer, updated_at: new Date().toISOString() }).eq('id', Number(inquiryMatch[1])).select().single()
+    const changes: Record<string, unknown> = { status, answer, updated_at: new Date().toISOString() }
+    if (typeof input.hidden === 'boolean') changes.is_hidden = input.hidden
+    const { data, error: updateError } = await db.from('inquiries').update(changes).eq('id', Number(inquiryMatch[1])).select().single()
     if (updateError) return error(updateError.message, 500)
     return json(data)
   }
@@ -305,7 +318,9 @@ async function handleAdmin(path: string, method: string, request: Request) {
     const input = await bodyOf(request)
     const status = String(input.status || '')
     if (!['pending', 'reviewed', 'resolved', 'dismissed'].includes(status)) return error('올바른 신고 상태가 아닙니다.')
-    const { data, error: updateError } = await db.from('reports').update({ status, updated_at: new Date().toISOString() }).eq('id', Number(reportMatch[1])).select().single()
+    const changes: Record<string, unknown> = { status, updated_at: new Date().toISOString() }
+    if (typeof input.hidden === 'boolean') changes.is_hidden = input.hidden
+    const { data, error: updateError } = await db.from('reports').update(changes).eq('id', Number(reportMatch[1])).select().single()
     if (updateError) return error(updateError.message, 500)
     return json(data)
   }
@@ -375,7 +390,7 @@ async function handleInquiries(path: string, method: string, request: Request) {
     return json(data, 201)
   }
   if (path === '/inquiries' && method === 'GET') {
-    const { data, error: readError } = await db.from('inquiries').select('*').eq('user_id', user.id).order('created_at', { ascending: false })
+    const { data, error: readError } = await db.from('inquiries').select('*').eq('user_id', user.id).eq('is_hidden', false).order('created_at', { ascending: false })
     if (readError) return error(readError.message, 500)
     return json(data || [])
   }
@@ -406,7 +421,7 @@ async function handleNotices(path: string, method: string) {
 async function handleReports(path: string, method: string, request: Request) {
   if (path === '/reports' && method === 'GET') {
     const user = await requiredUser(request)
-    const { data, error: readError } = await db.from('reports').select('id,target_type,target_id,reason,status,created_at,updated_at').eq('reporter_id', user.id).order('created_at', { ascending: false })
+    const { data, error: readError } = await db.from('reports').select('id,target_type,target_id,reason,status,created_at,updated_at,is_hidden').eq('reporter_id', user.id).eq('is_hidden', false).order('created_at', { ascending: false })
     if (readError) return error(readError.message, 500)
     return json(data || [])
   }

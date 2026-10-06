@@ -10,6 +10,5 @@ const Root = window.location.pathname === '/admin/account' ? AdminAccount : App
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <Root />
-    <a className="admin-launcher" href="/admin/login">관리자</a>
   </StrictMode>,
 )
