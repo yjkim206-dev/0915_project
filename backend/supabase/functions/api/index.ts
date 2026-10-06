@@ -349,6 +349,12 @@ async function handleInquiries(path: string, method: string, request: Request) {
 }
 
 async function handleReports(path: string, method: string, request: Request) {
+  if (path === '/reports' && method === 'GET') {
+    const user = await requiredUser(request)
+    const { data, error: readError } = await db.from('reports').select('id,target_type,target_id,reason,status,created_at,updated_at').eq('reporter_id', user.id).order('created_at', { ascending: false })
+    if (readError) return error(readError.message, 500)
+    return json(data || [])
+  }
   if (path !== '/reports' || method !== 'POST') return null
   const user = await requiredUser(request); const input = await bodyOf(request)
   const targetType = input.targetType === 'comment' ? 'comment' : input.targetType === 'post' ? 'post' : ''
