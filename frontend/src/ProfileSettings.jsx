@@ -3,14 +3,15 @@ import { apiFetch } from './api.js'
 import { authStorage } from './authStorage.js'
 
 export default function ProfileSettings({ profile, onSaved, panel }) {
-  const [form, setForm] = useState({ name: profile.name || '', bio: profile.bio || '', email: profile.email || '', currentPassword: '', newPassword: '', confirmPassword: '' })
+  const [form, setForm] = useState({ name: profile.name || '', bio: profile.bio || '', email: profile.email || '', profileImage: profile.profile_image || '', currentPassword: '', newPassword: '', confirmPassword: '' })
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const update = (event) => setForm((current) => ({ ...current, [event.target.name]: event.target.value }))
+  const selectImage = (event) => { const file = event.target.files?.[0]; if (!file) return; if (!file.type.startsWith('image/')) return setError('이미지 파일만 선택할 수 있습니다.'); if (file.size > 2 * 1024 * 1024) return setError('프로필 이미지는 2MB 이하로 선택해주세요.'); const reader = new FileReader(); reader.onload = () => setForm((current) => ({ ...current, profileImage: reader.result })); reader.readAsDataURL(file) }
   const saveProfile = async (event) => {
     event.preventDefault(); setMessage(''); setError('')
     try {
-      const data = await apiFetch('/profile', { method: 'PUT', headers: { Authorization: `Bearer ${authStorage.getItem('token')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: form.name, bio: form.bio, email: form.email }) })
+      const data = await apiFetch('/profile', { method: 'PUT', headers: { Authorization: `Bearer ${authStorage.getItem('token')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: form.name, bio: form.bio, email: form.email, profileImage: form.profileImage }) })
       setMessage('프로필 정보를 저장했습니다.'); onSaved?.(data)
     } catch (caught) { setError(caught.message) }
   }
@@ -23,5 +24,5 @@ export default function ProfileSettings({ profile, onSaved, panel }) {
     } catch (caught) { setError(caught.message) }
   }
   if (!panel) return null
-  return <section id="profile-settings" className="profile-settings">{panel === 'profile' && <><h2>프로필 편집</h2><form className="editor" onSubmit={saveProfile}><label>이름<input name="name" required value={form.name} onChange={update} /></label><label>이메일<input name="email" required type="email" value={form.email} onChange={update} /></label><label>소개<textarea name="bio" rows="3" value={form.bio} onChange={update} /></label><button className="button">프로필 저장</button></form></>}{panel === 'password' && <form id="password-settings" className="editor password-form" onSubmit={changePassword}><h2>비밀번호 변경</h2><label>현재 비밀번호<input name="currentPassword" required type="password" autoComplete="current-password" value={form.currentPassword} onChange={update} /></label><label>새 비밀번호<input name="newPassword" required minLength="8" type="password" autoComplete="new-password" value={form.newPassword} onChange={update} /></label><label>새 비밀번호 확인<input name="confirmPassword" required minLength="8" type="password" autoComplete="new-password" value={form.confirmPassword} onChange={update} /></label><button className="outline">비밀번호 변경</button></form>}{(message || error) && <p className="profile-message">{message || error}</p>}</section>
+  return <section id="profile-settings" className="profile-settings">{panel === 'profile' && <><h2>프로필 편집</h2><form className="editor" onSubmit={saveProfile}><label>프로필 사진<input type="file" accept="image/*" onChange={selectImage} />{form.profileImage && <img className="profile-preview" src={form.profileImage} alt="프로필 미리보기" />}</label><label>이름<input name="name" required value={form.name} onChange={update} /></label><label>이메일<input name="email" required type="email" value={form.email} onChange={update} /></label><label>소개<textarea name="bio" rows="3" value={form.bio} onChange={update} /></label><button className="button">프로필 저장</button></form></>}{panel === 'password' && <form id="password-settings" className="editor password-form" onSubmit={changePassword}><h2>비밀번호 변경</h2><label>현재 비밀번호<input name="currentPassword" required type="password" autoComplete="current-password" value={form.currentPassword} onChange={update} /></label><label>새 비밀번호<input name="newPassword" required minLength="8" type="password" autoComplete="new-password" value={form.newPassword} onChange={update} /></label><label>새 비밀번호 확인<input name="confirmPassword" required minLength="8" type="password" autoComplete="new-password" value={form.confirmPassword} onChange={update} /></label><button className="outline">비밀번호 변경</button></form>}{(message || error) && <p className="profile-message">{message || error}</p>}</section>
 }
