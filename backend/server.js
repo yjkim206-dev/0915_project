@@ -432,6 +432,129 @@ app.delete('/api/admin/posts/:id', requireAdmin, (req, res) => {
   });
 });
 
+const oneOf = (value, values, fallback) => values.includes(value) ? value : fallback;
+const supportItem = (table, id, res, message) => db.get(`SELECT * FROM ${table} WHERE id = ?`, [id], (error, item) => {
+  if (error || !item) return res.status(500).json({ message });
+  return res.json({ ...item, is_hidden: Boolean(item.is_hidden), is_published: item.is_published === undefined ? undefined : Boolean(item.is_published), show_as_modal: item.show_as_modal === undefined ? undefined : Boolean(item.show_as_modal) });
+});
+
+app.get('/api/notices', (req, res) => {
+  db.all('SELECT id, title, content, is_published, show_as_modal, created_at, updated_at FROM notices WHERE is_published = 1 ORDER BY created_at DESC', (error, items) => {
+    if (error) return res.status(500).json({ message: '공지사항을 불러오지 못했습니다.' });
+    return res.json(items.map((item) => ({ ...item, is_published: Boolean(item.is_published), show_as_modal: Boolean(item.show_as_modal) })));
+  });
+});
+
+app.get('/api/admin/notices', requireAdmin, (req, res) => {
+  db.all('SELECT * FROM notices ORDER BY created_at DESC', (error, items) => {
+    if (error) return res.status(500).json({ message: '공지사항을 불러오지 못했습니다.' });
+    return res.json(items.map((item) => ({ ...item, is_published: Boolean(item.is_published), show_as_modal: Boolean(item.show_as_modal) })));
+  });
+});
+
+app.post('/api/admin/notices', requireAdmin, (req, res) => {
+  const title = String(req.body.title || '').trim(); const content = String(req.body.content || '').trim();
+  if (!title || !content) return res.status(400).json({ message: '제목과 내용을 입력해 주세요.' });
+  if (title.length > 150 || content.length > 5000) return res.status(400).json({ message: '공지사항 길이를 확인해 주세요.' });
+  const published = req.body.published === false ? 0 : 1; const showAsModal = req.body.showAsModal === false ? 0 : 1;
+  db.run('INSERT INTO notices (title, content, is_published, show_as_modal) VALUES (?, ?, ?, ?)', [title, content, published, showAsModal], function (error) {
+    if (error) return res.status(500).json({ message: '공지사항을 등록하지 못했습니다.' });
+    supportItem('notices', this.lastID, res, '공지사항을 불러오지 못했습니다.');
+  });
+});
+
+app.patch('/api/admin/notices/:id', requireAdmin, (req, res) => {
+  db.get('SELECT * FROM notices WHERE id = ?', [req.params.id], (readError, item) => {
+    if (readError || !item) return res.status(404).json({ message: '공지사항을 찾을 수 없습니다.' });
+    const published = typeof req.body.published === 'boolean' ? Number(req.body.published) : item.is_published;
+    const showAsModal = typeof req.body.showAsModal === 'boolean' ? Number(req.body.showAsModal) : item.show_as_modal;
+    db.run('UPDATE notices SET is_published = ?, show_as_modal = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [published, showAsModal, req.params.id], (error) => {
+      if (error) return res.status(500).json({ message: '공지사항 상태를 변경하지 못했습니다.' });
+      supportItem('notices', req.params.id, res, '공지사항을 불러오지 못했습니다.');
+    });
+  });
+});
+
+app.post('/api/inquiries', requireAuth, (req, res) => {
+  const content = String(req.body.content || '').trim();
+  if (!content || content.length > 3000) return res.status(400).json({ message: '문의 내용은 1~3,000자로 입력해 주세요.' });
+  db.run('INSERT INTO inquiries (user_id, content) VALUES (?, ?)', [req.user.id, content], function (error) {
+    if (error) return res.status(500).json({ message: '문의 접수에 실패했습니다.' });
+    supportItem('inquiries', this.lastID, res, '문의 내용을 불러오지 못했습니다.');
+  });
+});
+
+app.get('/api/inquiries', requireAuth, (req, res) => {
+  db.all('SELECT id, content, answer, status, created_at, updated_at FROM inquiries WHERE user_id = ? AND is_hidden = 0 ORDER BY created_at DESC', [req.user.id], (error, items) => {
+    if (error) return res.status(500).json({ message: '문의 내역을 불러오지 못했습니다.' }); return res.json(items);
+  });
+});
+
+app.put('/api/inquiries/:id', requireAuth, (req, res) => {
+  const content = String(req.body.content || '').trim();
+  if (!content || content.length > 3000) return res.status(400).json({ message: '문의 내용을 확인해 주세요.' });
+  db.run("UPDATE inquiries SET content = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ? AND status IN ('received', 'in_progress')", [content, req.params.id, req.user.id], function (error) {
+    if (error) return res.status(500).json({ message: '문의를 수정하지 못했습니다.' });
+    if (!this.changes) return res.status(403).json({ message: '수정할 수 없는 문의입니다.' }); supportItem('inquiries', req.params.id, res, '문의 내용을 불러오지 못했습니다.');
+  });
+});
+
+app.delete('/api/inquiries/:id', requireAuth, (req, res) => db.run('DELETE FROM inquiries WHERE id = ? AND user_id = ?', [req.params.id, req.user.id], function (error) {
+  if (error) return res.status(500).json({ message: '문의를 삭제하지 못했습니다.' }); if (!this.changes) return res.status(404).json({ message: '문의를 찾을 수 없습니다.' }); return res.status(204).send();
+}));
+
+app.get('/api/admin/inquiries', requireAdmin, (req, res) => db.all('SELECT inquiries.*, users.name AS user_name, users.email AS user_email FROM inquiries JOIN users ON users.id = inquiries.user_id ORDER BY inquiries.created_at DESC', (error, items) => {
+  if (error) return res.status(500).json({ message: '문의 목록을 불러오지 못했습니다.' }); return res.json(items.map((item) => ({ ...item, is_hidden: Boolean(item.is_hidden) })));
+}));
+
+app.patch('/api/admin/inquiries/:id', requireAdmin, (req, res) => {
+  const answer = String(req.body.answer || '').trim(); const status = oneOf(req.body.status, ['received', 'in_progress', 'answered', 'closed'], 'received');
+  if (status === 'answered' && !answer) return res.status(400).json({ message: '답변 내용을 입력해 주세요.' });
+  db.run('UPDATE inquiries SET answer = ?, status = ?, is_hidden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [answer, status, req.body.hidden ? 1 : 0, req.params.id], function (error) {
+    if (error) return res.status(500).json({ message: '문의 처리에 실패했습니다.' }); if (!this.changes) return res.status(404).json({ message: '문의를 찾을 수 없습니다.' });
+    db.get('SELECT inquiries.*, users.name AS user_name, users.email AS user_email FROM inquiries JOIN users ON users.id = inquiries.user_id WHERE inquiries.id = ?', [req.params.id], (readError, item) => res.json({ ...item, is_hidden: Boolean(item.is_hidden) }));
+  });
+});
+
+app.post('/api/reports', requireAuth, (req, res) => {
+  const targetType = oneOf(req.body.targetType, ['post', 'comment'], null); const targetId = Number(req.body.targetId); const reason = String(req.body.reason || '').trim();
+  if (!targetType || !Number.isInteger(targetId) || targetId < 1 || !reason || reason.length > 1000) return res.status(400).json({ message: '신고 내용을 확인해 주세요.' });
+  const table = targetType === 'post' ? 'posts' : 'comments';
+  db.get(`SELECT id FROM ${table} WHERE id = ?`, [targetId], (readError, target) => {
+    if (readError || !target) return res.status(404).json({ message: '신고 대상을 찾을 수 없습니다.' });
+    db.run('INSERT INTO reports (reporter_id, target_type, target_id, reason) VALUES (?, ?, ?, ?)', [req.user.id, targetType, targetId, reason], function (error) {
+      if (error) return res.status(500).json({ message: '신고 접수에 실패했습니다.' }); supportItem('reports', this.lastID, res, '신고 내용을 불러오지 못했습니다.');
+    });
+  });
+});
+
+app.get('/api/reports', requireAuth, (req, res) => db.all('SELECT id, target_type, target_id, reason, status, created_at, updated_at FROM reports WHERE reporter_id = ? AND is_hidden = 0 ORDER BY created_at DESC', [req.user.id], (error, items) => {
+  if (error) return res.status(500).json({ message: '신고 내역을 불러오지 못했습니다.' }); return res.json(items);
+}));
+
+app.put('/api/reports/:id', requireAuth, (req, res) => {
+  const reason = String(req.body.reason || '').trim(); if (!reason || reason.length > 1000) return res.status(400).json({ message: '신고 내용을 확인해 주세요.' });
+  db.run("UPDATE reports SET reason = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND reporter_id = ? AND status = 'pending'", [reason, req.params.id, req.user.id], function (error) {
+    if (error) return res.status(500).json({ message: '신고를 수정하지 못했습니다.' }); if (!this.changes) return res.status(403).json({ message: '수정할 수 없는 신고입니다.' }); supportItem('reports', req.params.id, res, '신고 내용을 불러오지 못했습니다.');
+  });
+});
+
+app.delete('/api/reports/:id', requireAuth, (req, res) => db.run('DELETE FROM reports WHERE id = ? AND reporter_id = ?', [req.params.id, req.user.id], function (error) {
+  if (error) return res.status(500).json({ message: '신고를 삭제하지 못했습니다.' }); if (!this.changes) return res.status(404).json({ message: '신고를 찾을 수 없습니다.' }); return res.status(204).send();
+}));
+
+app.get('/api/admin/reports', requireAdmin, (req, res) => db.all('SELECT reports.*, users.name AS reporter, users.email AS reporter_email FROM reports JOIN users ON users.id = reports.reporter_id ORDER BY reports.created_at DESC', (error, items) => {
+  if (error) return res.status(500).json({ message: '신고 목록을 불러오지 못했습니다.' }); return res.json(items.map((item) => ({ ...item, is_hidden: Boolean(item.is_hidden) })));
+}));
+
+app.patch('/api/admin/reports/:id', requireAdmin, (req, res) => {
+  const status = oneOf(req.body.status, ['pending', 'reviewed', 'resolved', 'dismissed'], 'pending');
+  db.run('UPDATE reports SET status = ?, is_hidden = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?', [status, req.body.hidden ? 1 : 0, req.params.id], function (error) {
+    if (error) return res.status(500).json({ message: '신고 처리에 실패했습니다.' }); if (!this.changes) return res.status(404).json({ message: '신고를 찾을 수 없습니다.' });
+    db.get('SELECT reports.*, users.name AS reporter, users.email AS reporter_email FROM reports JOIN users ON users.id = reports.reporter_id WHERE reports.id = ?', [req.params.id], (readError, item) => res.json({ ...item, is_hidden: Boolean(item.is_hidden) }));
+  });
+});
+
 app.post('/api/posts', requireAuth, (req, res) => {
   const { title, content, category = '자유' } = req.body;
   if (!title?.trim() || !content?.trim()) return res.status(400).json({ message: '제목과 내용을 입력해주세요.' });

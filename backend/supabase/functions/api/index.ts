@@ -28,14 +28,16 @@ async function requiredUser(request: Request) {
   return user
 }
 
-async function ensureUser(user: User) {
-  const { error: userError } = await db.from('users').upsert({ id: user.id, email: user.email || '', updated_at: new Date().toISOString() }, { onConflict: 'id' })
+async function ensureUser(user: User, displayName?: string) {
+  const resolvedName = displayName?.trim() || user.user_metadata?.display_name || user.user_metadata?.name || user.email?.split('@')[0] || '회원'
+  const { error: userError } = await db.from('users').upsert({ id: user.id, email: user.email || '', display_name: resolvedName, updated_at: new Date().toISOString() }, { onConflict: 'id' })
   if (userError) throw userError
 }
 
 async function ensureProfile(user: User, name?: string) {
-  await ensureUser(user)
-  const profile = { id: user.id, name: name?.trim() || user.user_metadata?.name || user.email?.split('@')[0] || '회원', email: user.email || '', bio: '', profile_image: '' }
+  const displayName = name?.trim() || user.user_metadata?.display_name || user.user_metadata?.name || user.email?.split('@')[0] || '회원'
+  await ensureUser(user, displayName)
+  const profile = { id: user.id, name: displayName, display_name: displayName, email: user.email || '', bio: '', profile_image: '' }
   const { data, error: profileError } = await db.from('profiles').upsert(profile, { onConflict: 'id', ignoreDuplicates: true }).select().maybeSingle()
   if (profileError) throw profileError
   if (data) {
@@ -97,7 +99,7 @@ async function handleAuth(path: string, request: Request) {
     if (!name || !/^\S+@\S+\.\S+$/.test(email) || password.length < 8) return error('이름, 올바른 이메일, 8자 이상의 비밀번호를 입력해주세요.')
     // Supabase Auth owns account creation, so the account is visible in
     // Dashboard > Authentication > Users and database triggers can synchronize it.
-    const { data: created, error: createError } = await auth.auth.signUp({ email, password, options: { data: { name } } })
+    const { data: created, error: createError } = await auth.auth.signUp({ email, password, options: { data: { name, display_name: name } } })
     if (createError || !created.user) return error(createError?.message || '회원가입에 실패했습니다.', createError?.status || 409)
     await ensureProfile(created.user, name)
     if (!created.session) return error('Email confirmation is required before logging in.', 403)
@@ -148,7 +150,7 @@ async function handleProfile(path: string, request: Request) {
   }
   const name = String(input.name || '').trim()
   if (!name) return error('이름을 입력해주세요.')
-  const { data, error: updateError } = await db.from('profiles').update({ name, bio: String(input.bio || '').trim(), profile_image: String(input.profileImage || '') }).eq('id', user.id).select().single()
+  const { data, error: updateError } = await db.from('profiles').update({ name, display_name: name, bio: String(input.bio || '').trim(), profile_image: String(input.profileImage || '') }).eq('id', user.id).select().single()
   if (updateError) return error(updateError.message, 500)
   return json(data)
 }
@@ -231,13 +233,22 @@ async function handleComments(path: string, method: string, request: Request) {
 async function handleAdmin(path: string, method: string, request: Request) {
   const { profile } = await adminUser(request)
   if (path === '/admin/dashboard' && method === 'GET') {
-    const [{ data: posts }, { data: comments }, { data: users }, { data: views }, { data: reactions }] = await Promise.all([
+    const [postResult, commentResult, userResult, viewResult, reactionResult, recentPostsResult, recentCommentsResult] = await Promise.all([
       db.from('posts').select('created_at,views'),
       db.from('comments').select('created_at'),
       db.from('profiles').select('created_at'),
       db.from('post_views').select('created_at'),
       db.from('post_reactions').select('created_at,reaction'),
+      db.from('post_list').select('*').order('created_at', { ascending: false }).limit(6),
+      db.from('comments').select('id,content,created_at,author_id,profiles:author_id(name)').order('created_at', { ascending: false }).limit(6),
     ])
+    const queryError = [postResult, commentResult, userResult, viewResult, reactionResult, recentPostsResult, recentCommentsResult].find((result) => result.error)?.error
+    if (queryError) return error(queryError.message, 500)
+    const posts = postResult.data
+    const comments = commentResult.data
+    const users = userResult.data
+    const views = viewResult.data
+    const reactions = reactionResult.data
     const now = Date.now()
     const ranges: Record<string, number> = { day: 1, week: 7, month: 30, quarter: 90, year: 365 }
     const inRange = (value: string, days: number) => now - new Date(value).getTime() <= days * 86400000
@@ -249,7 +260,12 @@ async function handleAdmin(path: string, method: string, request: Request) {
       const reactionRows = (reactions || []).filter((row) => inRange(row.created_at, days))
       return { posts: postRows.length, comments: commentRows.length, users: userRows.length, views: viewRows.length, likes: reactionRows.filter((row) => row.reaction === 'like').length, dislikes: reactionRows.filter((row) => row.reaction === 'dislike').length }
     }
-    return json({ metrics: { posts: (posts || []).length, comments: (comments || []).length, users: (users || []).length, views: (posts || []).reduce((sum, row) => sum + (row.views || 0), 0) }, periods: Object.fromEntries(Object.entries(ranges).map(([key, days]) => [key, build(days)])) })
+    return json({
+      metrics: { posts: (posts || []).length, comments: (comments || []).length, users: (users || []).length, views: (posts || []).reduce((sum, row) => sum + (row.views || 0), 0) },
+      periods: Object.fromEntries(Object.entries(ranges).map(([key, days]) => [key, build(days)])),
+      recentPosts: (recentPostsResult.data || []).map(postPayload),
+      recentComments: (recentCommentsResult.data || []).map((comment: any) => ({ ...comment, author: comment.profiles?.name || 'Unknown user' })),
+    })
   }
   if (path === '/admin/notices' && method === 'GET') {
     const { data, error: readError } = await db.from('notices').select('*').order('published_at', { ascending: false })
@@ -455,9 +471,18 @@ async function handleReports(path: string, method: string, request: Request) {
 async function handleAdminUsers(path: string, method: string, request: Request) {
   const { profile } = await adminUser(request)
   if (path === '/admin/users' && method === 'GET') {
-    const { data, error: readError } = await db.from('profiles').select('id,name,email,role,created_at').order('created_at', { ascending: false })
+    const [accountsResult, profilesResult, adminsResult] = await Promise.all([
+      db.from('users').select('id,email,created_at'),
+      db.from('profiles').select('id,name,display_name,email,role,created_at'),
+      db.from('admins').select('id,name,display_name,email,created_at'),
+    ])
+    const readError = [accountsResult, profilesResult, adminsResult].find((result) => result.error)?.error
     if (readError) return error(readError.message, 500)
-    return json(data || [])
+    const rows = new Map<string, any>()
+    for (const account of accountsResult.data || []) rows.set(account.id, { ...account, name: account.email?.split('@')[0] || '사용자', role: 'user' })
+    for (const item of profilesResult.data || []) rows.set(item.id, { ...rows.get(item.id), ...item, name: item.display_name || item.name || rows.get(item.id)?.name || item.email?.split('@')[0] || '사용자', role: item.role || 'user' })
+    for (const admin of adminsResult.data || []) rows.set(admin.id, { ...rows.get(admin.id), ...admin, name: admin.display_name || admin.name || rows.get(admin.id)?.name || admin.email?.split('@')[0] || '관리자', role: 'admin' })
+    return json([...rows.values()].sort((a, b) => Number(b.role === 'admin') - Number(a.role === 'admin') || String(b.created_at || '').localeCompare(String(a.created_at || ''))))
   }
   const match = path.match(/^\/admin\/users\/([^/]+)$/)
   if (!match) return null
@@ -484,7 +509,7 @@ async function handler(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers })
   const url = new URL(request.url); const path = url.pathname.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '') || '/'; const method = request.method
   try {
-    if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running' })
+    if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running', admin_configured: Boolean(configuredAdminName && configuredAdminEmail && configuredAdminPassword) })
     if (path === '/admin/login' && method === 'POST') return handleAdminLogin(request)
     if ((path === '/auth/login' || path === '/auth/signup') && method === 'POST') return handleAuth(path, request)
     if (path === '/profile' && (method === 'GET' || method === 'PUT')) return handleProfile(path, request)

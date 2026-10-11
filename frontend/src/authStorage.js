@@ -7,6 +7,25 @@ const expired = () => {
   return expiresAt > 0 && expiresAt <= Date.now()
 }
 
+let expiryTimer
+
+const scheduleExpiry = () => {
+  if (typeof window === 'undefined') return
+  window.clearTimeout(expiryTimer)
+  const expiresAt = expiration()
+  if (!expiresAt) return
+  const remaining = expiresAt - Date.now()
+  if (remaining <= 0) {
+    authStorage.clear()
+    window.location.assign('/login')
+    return
+  }
+  expiryTimer = window.setTimeout(() => {
+    authStorage.clear()
+    window.location.assign('/login')
+  }, remaining)
+}
+
 export const authStorage = {
   getItem(key) {
     if (key !== 'authExpiresAt' && expired()) {
@@ -14,12 +33,16 @@ export const authStorage = {
       return null
     }
     const persistentValue = localStorage.getItem(key)
-    if (persistentValue !== null) return persistentValue
+    if (persistentValue !== null) {
+      scheduleExpiry()
+      return persistentValue
+    }
     const legacySessionValue = sessionStorage.getItem(key)
     if (legacySessionValue !== null) {
       localStorage.setItem(key, legacySessionValue)
       sessionStorage.removeItem(key)
     }
+    scheduleExpiry()
     return legacySessionValue
   },
   setItem(key, value) {
@@ -28,6 +51,7 @@ export const authStorage = {
   },
   beginSession() {
     this.setItem('authExpiresAt', String(Date.now() + SESSION_DURATION_MS))
+    scheduleExpiry()
   },
   getExpiresAt() {
     return expiration()
@@ -40,6 +64,7 @@ export const authStorage = {
     sessionStorage.removeItem(key)
   },
   clear() {
+    if (typeof window !== 'undefined') window.clearTimeout(expiryTimer)
     keys.forEach((key) => this.removeItem(key))
   },
 }
