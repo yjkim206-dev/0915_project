@@ -12,6 +12,22 @@ Get-Content -LiteralPath $envFile | ForEach-Object {
   }
 }
 
+# Preserve compatibility with an existing backend/.env while the project-wide
+# .env is being adopted. Project-root values always take precedence.
+$backendEnvFile = Join-Path $projectRoot 'backend\.env'
+if (Test-Path -LiteralPath $backendEnvFile) {
+  Get-Content -LiteralPath $backendEnvFile | ForEach-Object {
+    if ($_ -match '^\s*([^#][^=]*)=(.*)$') {
+      $key = $matches[1].Trim()
+      $value = $matches[2].Trim().Trim('"').Trim("'")
+      if ($key -eq 'ADMIN _NAME') { $key = 'ADMIN_NAME' }
+      if ($key -in @('ADMIN_NAME', 'ADMIN_EMAIL', 'ADMIN_PASSWORD') -and -not [Environment]::GetEnvironmentVariable($key, 'Process')) {
+        [Environment]::SetEnvironmentVariable($key, $value, 'Process')
+      }
+    }
+  }
+}
+
 if (-not $env:SUPABASE_ACCESS_TOKEN) { throw 'SUPABASE_ACCESS_TOKEN이 .env에 없습니다.' }
 if (-not $env:SUPABASE_PROJECT_REF) { throw 'SUPABASE_PROJECT_REF가 .env에 없습니다.' }
 if (-not $env:SUPABASE_SERVICE_ROLE_KEY) { throw 'SUPABASE_SERVICE_ROLE_KEY가 .env에 없습니다.' }
