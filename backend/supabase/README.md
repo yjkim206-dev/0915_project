@@ -1,33 +1,19 @@
-# Supabase Edge Function backend
+# Supabase resources
 
-이 폴더는 기존 Express/SQLite 백엔드를 Supabase Edge Function + Postgres로 옮긴 구성입니다.
+- `functions/api/index.ts`: complete HTTP API Edge Function
+- `migrations/`: PostgreSQL schema and data migrations
+- `config.toml`: function configuration
+- `deploy.ps1`: links the configured project, applies migrations, updates
+  administrator secrets, and deploys `api`
 
-## 배포
+From the repository root, run:
 
-1. Supabase CLI로 프로젝트를 연결합니다.
-
-```bash
-cd backend
-supabase login
-supabase link --project-ref <PROJECT_REF>
-supabase db push
-supabase functions deploy api
+```powershell
+npm.cmd --prefix backend run deploy
 ```
 
-2. Edge Function secrets를 설정합니다.
+The deployed API URL is:
 
-```bash
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY>
+```text
+https://<PROJECT_REF>.supabase.co/functions/v1/api
 ```
-
-`SUPABASE_URL`과 `SUPABASE_ANON_KEY`는 Supabase Edge Runtime에 기본 제공됩니다.
-
-3. 첫 관리자 계정을 Supabase Auth에서 만든 뒤 SQL Editor에서 권한을 부여합니다.
-
-```sql
-update public.profiles set role = 'admin' where email = '관리자 이메일';
-```
-
-프론트 Vercel 환경변수 `VITE_API_URL`은 다음처럼 설정합니다.
-
-`https://<PROJECT_REF>.supabase.co/functions/v1/api`

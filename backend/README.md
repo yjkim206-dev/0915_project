@@ -1,16 +1,35 @@
-# Backend deployment
+# Supabase Edge Function backend
 
-운영 백엔드는 `supabase/` 아래의 Edge Function과 Postgres migration을 사용합니다.
+Production backend code lives in `supabase/functions/api/index.ts` and runs on
+Supabase Edge Functions (Deno). Database schema changes are versioned in
+`supabase/migrations/`. Express and SQLite are no longer used.
 
-```bash
-cd backend
-supabase login
-supabase link --project-ref <PROJECT_REF>
-supabase db push
-supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<SERVICE_ROLE_KEY>
-supabase functions deploy api
+## Required local secrets
+
+Create the project-root `.env` from `.env.example`. Keep this file untracked.
+
+```env
+SUPABASE_PROJECT_REF=your-project-ref
+SUPABASE_ACCESS_TOKEN=your-cli-access-token
+SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+ADMIN_NAME=Administrator
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=use-a-strong-password
 ```
 
-배포 후 Vercel의 `VITE_API_URL`을 `https://<PROJECT_REF>.supabase.co/functions/v1/api`로 설정하세요.
+The browser receives only the public values in `frontend/.env.local`:
 
-기존 `server.js`와 `database.js`는 로컬 Express/SQLite 개발용 호환 코드이며, Supabase 배포에는 사용하지 않습니다.
+```env
+VITE_API_URL=https://your-project-ref.supabase.co/functions/v1/api
+VITE_SUPABASE_ANON_KEY=your-publishable-key
+```
+
+## Development and deployment
+
+Run `npm.cmd run dev:backend` to serve the `api` Edge Function locally. Local
+Edge Function serving requires Docker. Deploy the database migrations and API
+function with `npm.cmd --prefix backend run deploy`.
+
+The function provisions the administrator configured by the three `ADMIN_*`
+secrets when that account signs in, and stores the account in Supabase Auth,
+`public.users`, `public.profiles`, and `public.admins`.

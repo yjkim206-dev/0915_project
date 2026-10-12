@@ -17,10 +17,13 @@ if (-not $env:SUPABASE_PROJECT_REF) { throw 'SUPABASE_PROJECT_REF가 .env에 없
 if (-not $env:SUPABASE_SERVICE_ROLE_KEY) { throw 'SUPABASE_SERVICE_ROLE_KEY가 .env에 없습니다.' }
 
 Set-Location (Join-Path $projectRoot 'backend')
-npx.cmd supabase secrets set "ADMIN_NAME=$env:ADMIN_NAME" "ADMIN_EMAIL=$env:ADMIN_EMAIL" "ADMIN_PASSWORD=$env:ADMIN_PASSWORD"
+if ($env:ADMIN_NAME -and $env:ADMIN_EMAIL -and $env:ADMIN_PASSWORD) {
+  npx.cmd supabase secrets set "ADMIN_NAME=$env:ADMIN_NAME" "ADMIN_EMAIL=$env:ADMIN_EMAIL" "ADMIN_PASSWORD=$env:ADMIN_PASSWORD"
+} else {
+  Write-Warning 'ADMIN_* values are absent; existing remote administrator secrets are unchanged.'
+}
 npx.cmd supabase link --project-ref $env:SUPABASE_PROJECT_REF
 npx.cmd supabase db push
-npx.cmd supabase secrets set SUPABASE_SERVICE_ROLE_KEY=$env:SUPABASE_SERVICE_ROLE_KEY
 npx.cmd supabase functions deploy api
 
 Write-Host 'Supabase migration과 api Edge Function 배포가 완료되었습니다.'

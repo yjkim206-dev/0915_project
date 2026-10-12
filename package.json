@@ -8,6 +8,6 @@
     "dev:backend": "npm --prefix backend run dev",
     "build": "npm --prefix frontend run build",
     "lint": "npm --prefix frontend run lint",
-    "start": "npm --prefix backend start"
+    "start": "npm --prefix frontend run preview"
   }
 }
