@@ -1,8 +1,10 @@
 import { createClient, type SupabaseClient, type User } from 'jsr:@supabase/supabase-js@2'
+import { handlePaymentRoutes } from './payments.ts'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const tossSecretKey = Deno.env.get('TOSS_SECRET_KEY') || ''
 const configuredAdminName = Deno.env.get('ADMIN_NAME')?.trim() || ''
 const configuredAdminEmail = Deno.env.get('ADMIN_EMAIL')?.trim().toLowerCase() || ''
 const configuredAdminPassword = Deno.env.get('ADMIN_PASSWORD') || ''
@@ -34,10 +36,32 @@ async function ensureUser(user: User, displayName?: string) {
   if (userError) throw userError
 }
 
+function socialProfileImage(user: User) {
+  const metadata = (user.user_metadata || {}) as Record<string, any>
+  const kakaoIdentity = (user.identities || []).find((identity) => identity.provider === 'kakao')?.identity_data as Record<string, any> | undefined
+  const candidate = metadata.avatar_url
+    || metadata.picture
+    || metadata.profile_image
+    || metadata.properties?.profile_image
+    || metadata.kakao_account?.profile?.profile_image_url
+    || kakaoIdentity?.avatar_url
+    || kakaoIdentity?.picture
+    || kakaoIdentity?.profile_image
+    || kakaoIdentity?.properties?.profile_image
+  if (typeof candidate !== 'string' || !candidate) return ''
+  try {
+    const url = new URL(candidate)
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : ''
+  } catch {
+    return ''
+  }
+}
+
 async function ensureProfile(user: User, name?: string) {
   const displayName = name?.trim() || user.user_metadata?.display_name || user.user_metadata?.name || user.email?.split('@')[0] || '회원'
   await ensureUser(user, displayName)
-  const profile = { id: user.id, name: displayName, display_name: displayName, email: user.email || '', bio: '', profile_image: '' }
+  const avatarUrl = socialProfileImage(user)
+  const profile = { id: user.id, name: displayName, display_name: displayName, email: user.email || '', bio: '', profile_image: avatarUrl }
   const { data, error: profileError } = await db.from('profiles').upsert(profile, { onConflict: 'id', ignoreDuplicates: true }).select().maybeSingle()
   if (profileError) throw profileError
   if (data) {
@@ -47,6 +71,11 @@ async function ensureProfile(user: User, name?: string) {
   }
   const { data: existing, error: readError } = await db.from('profiles').select('*').eq('id', user.id).single()
   if (readError) throw readError
+  if (!existing.profile_image && avatarUrl) {
+    const { data: updated, error: avatarError } = await db.from('profiles').update({ profile_image: avatarUrl }).eq('id', user.id).eq('profile_image', '').select().maybeSingle()
+    if (avatarError) throw avatarError
+    if (updated) existing.profile_image = updated.profile_image
+  }
   const { data: admin } = await db.from('admins').select('id').eq('id', user.id).maybeSingle()
   if (admin) existing.role = 'admin'
   return existing
@@ -510,6 +539,11 @@ async function handler(request: Request) {
   const url = new URL(request.url); const path = url.pathname.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '') || '/'; const method = request.method
   try {
     if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running', admin_configured: Boolean(configuredAdminName && configuredAdminEmail && configuredAdminPassword) })
+    if (path === '/shop/products' || path.startsWith('/payments/')) {
+      if (['/payments/confirm', '/payments/subscriptions/activate'].includes(path) && !tossSecretKey) return error('Toss 결제 시크릿 키가 서버에 설정되지 않았습니다.', 503)
+      const paymentResult = await handlePaymentRoutes(path, method, request, db, requiredUser, tossSecretKey)
+      if (paymentResult) return paymentResult
+    }
     if (path === '/admin/login' && method === 'POST') return handleAdminLogin(request)
     if ((path === '/auth/login' || path === '/auth/signup') && method === 'POST') return handleAuth(path, request)
     if (path === '/profile' && (method === 'GET' || method === 'PUT')) return handleProfile(path, request)

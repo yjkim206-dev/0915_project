@@ -29,13 +29,18 @@ if (Test-Path -LiteralPath $backendEnvFile) {
 }
 
 if (-not $env:SUPABASE_ACCESS_TOKEN) { throw 'SUPABASE_ACCESS_TOKEN이 .env에 없습니다.' }
-if (-not $env:SUPABASE_PROJECT_REF) { throw 'SUPABASE_PROJECT_REF가 .env에 없습니다.' }
+if (-not $env:SUPABASE_PROJECT_REF -and $env:SUPABASE_URL -match '^https://([a-z0-9]+)\.supabase\.co/?$') { $env:SUPABASE_PROJECT_REF = $matches[1] }
+if (-not $env:SUPABASE_PROJECT_REF) { throw 'SUPABASE_PROJECT_REF 또는 SUPABASE_URL이 .env에 필요합니다.' }
 if (-not $env:SUPABASE_SERVICE_ROLE_KEY) { throw 'SUPABASE_SERVICE_ROLE_KEY가 .env에 없습니다.' }
+if (-not $env:TOSS_SECRET_KEY) { throw 'TOSS_SECRET_KEY가 .env에 없습니다.' }
 
 Set-Location (Join-Path $projectRoot 'backend')
 if ($env:ADMIN_NAME -and $env:ADMIN_EMAIL -and $env:ADMIN_PASSWORD) {
-  npx.cmd supabase secrets set "ADMIN_NAME=$env:ADMIN_NAME" "ADMIN_EMAIL=$env:ADMIN_EMAIL" "ADMIN_PASSWORD=$env:ADMIN_PASSWORD"
+  npx.cmd supabase secrets set "ADMIN_NAME=$env:ADMIN_NAME" "ADMIN_EMAIL=$env:ADMIN_EMAIL" "ADMIN_PASSWORD=$env:ADMIN_PASSWORD" "TOSS_SECRET_KEY=$env:TOSS_SECRET_KEY"
+  if ($LASTEXITCODE -ne 0) { throw 'Supabase Edge Function secrets were not updated; check the access token permission edge_functions_secrets_write.' }
 } else {
+  npx.cmd supabase secrets set "TOSS_SECRET_KEY=$env:TOSS_SECRET_KEY"
+  if ($LASTEXITCODE -ne 0) { throw 'Supabase Edge Function secrets were not updated; check the access token permission edge_functions_secrets_write.' }
   Write-Warning 'ADMIN_* values are absent; existing remote administrator secrets are unchanged.'
 }
 npx.cmd supabase link --project-ref $env:SUPABASE_PROJECT_REF
