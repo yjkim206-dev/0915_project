@@ -145,14 +145,14 @@ export default function TossPaymentsPage() {
       {account && <section className="shop-notice shop-account-summary"><strong>내 결제 정보</strong><span>보유 포인트: {Number(account.balance).toLocaleString('ko-KR')}P</span>{account.subscription && <span>구독 상태: {account.subscription.cancel_at_period_end ? '해지 예약' : account.subscription.status === 'active' ? '이용 중' : account.subscription.status}</span>}{account.subscription?.status === 'active' && !account.subscription.cancel_at_period_end && <button className="shop-button secondary" disabled={busy} onClick={cancelSubscription}>구독 해지 예약</button>}</section>}
       {!clientKey && <div className="shop-notice warning">결제 키가 설정되지 않았습니다. Vercel의 VITE_TOSS_CLIENT_KEY를 확인해 주세요.</div>}
 
-      <section className="shop-section">
+      <div className="shop-purchase-options">
+      <section className="shop-section shop-option">
         <div className="shop-section-heading"><div><span className="shop-kicker">MONTHLY MEMBERSHIP</span><h2>월간 구독</h2><p>매월 자동 결제로 모아 프리미엄 혜택을 이용하세요.</p></div><span className="shop-pill">월간</span></div>
         <article className="shop-subscription-card"><div className="shop-plan-copy"><span className="shop-plan-label">MOA PREMIUM</span><h3>프리미엄 멤버십</h3><p>커뮤니티를 더 편리하게 이용할 수 있는 월간 플랜</p><ul><li>프리미엄 멤버십 이용</li><li>매월 자동 결제</li><li>언제든 구독 해지 가능</li></ul></div><div className="shop-plan-price"><strong>{subscription ? money(subscription.amount) : '불러오는 중'}</strong><small>월 1회 결제</small><button className="shop-button primary" disabled={busy || !subscription} onClick={subscribe}>{busy ? '처리 중…' : '구독 카드 등록 및 첫 결제'}</button><small className="shop-legal-note">카드 인증 후 서버가 첫 달 결제를 승인합니다.</small></div></article>
       </section>
-
-      <section className="shop-section"><div className="shop-section-heading"><div><span className="shop-kicker">CREDIT POINTS</span><h2>크레딧 충전</h2><p>필요한 만큼 포인트를 충전해 보세요.</p></div><span className="shop-pill">1회 결제</span></div>
+      <section className="shop-section shop-option"><div className="shop-section-heading"><div><span className="shop-kicker">CREDIT POINTS</span><h2>크레딧 충전</h2><p>필요한 만큼 포인트를 충전해 보세요.</p></div><span className="shop-pill">1회 결제</span></div>
         <div className="shop-credit-grid">{credits.map((item, index) => <article className={`shop-credit-card${index === credits.length - 1 ? ' featured' : ''}`} key={item.id}><div className="shop-credit-icon">P</div><span className="shop-credit-label">포인트 충전</span><h3>{Number(item.credits).toLocaleString('ko-KR')}P</h3><p>{item.name}</p><div className="shop-credit-price">{money(item.amount)}</div><button className="shop-button secondary" disabled={busy} onClick={() => buyCredits(item)}>{busy ? '처리 중…' : '결제하고 포인트 충전'}</button></article>)}</div>
-      </section>
+      </section></div>
 
       <aside className="shop-footer-note"><strong>결제 처리 안내</strong><p>결제 금액은 서버가 상품 DB 값과 대조하고 Toss 승인 API로 확인한 뒤에만 주문을 완료합니다. 포인트 지급은 중복되지 않도록 결제 원장과 잔액을 한 번에 기록합니다. 구독 첫 결제는 카드 등록 직후 승인되며, 다음 달 반복 청구를 위해서는 별도 스케줄러 설정이 필요합니다.</p></aside>
     </div>
