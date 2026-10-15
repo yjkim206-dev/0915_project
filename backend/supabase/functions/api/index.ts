@@ -93,22 +93,30 @@ async function adminUser(request: Request) {
 
 async function provisionConfiguredAdmin() {
   if (!configuredAdminEmail || !configuredAdminPassword) return
+  const configuredName = configuredAdminName || '관리자'
   const { data: listed, error: listError } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 })
   if (listError) throw listError
   let user = listed.users.find((item) => item.email?.toLowerCase() === configuredAdminEmail)
   if (!user) {
-    const { data, error: createError } = await db.auth.admin.createUser({ email: configuredAdminEmail, password: configuredAdminPassword, email_confirm: true, user_metadata: { name: configuredAdminName || '관리자' } })
-    if (createError || !data.user) throw createError || new Error('관리자 계정을 만들지 못했습니다.')
-    user = data.user
-  } else {
-    const { error: updateError } = await db.auth.admin.updateUserById(user.id, { password: configuredAdminPassword, email_confirm: true, user_metadata: { name: configuredAdminName || '관리자' } })
+    const { data, error: createError } = await db.auth.admin.createUser({ email: configuredAdminEmail, password: configuredAdminPassword, email_confirm: true, user_metadata: { name: configuredName } })
+    if (createError || !data.user) {
+      // A second simultaneous login may have created this account after listUsers.
+      const { data: latest, error: retryError } = await db.auth.admin.listUsers({ page: 1, perPage: 1000 })
+      if (retryError) throw retryError
+      user = latest.users.find((item) => item.email?.toLowerCase() === configuredAdminEmail)
+      if (!user) throw createError || new Error('관리자 계정을 만들지 못했습니다.')
+    } else {
+      user = data.user
+    }
+  } else if (!user.email_confirmed_at || user.user_metadata?.name !== configuredName) {
+    // Keep profile metadata current without resetting the password on every login.
+    const { error: updateError } = await db.auth.admin.updateUserById(user.id, { email_confirm: true, user_metadata: { name: configuredName } })
     if (updateError) throw updateError
   }
-  await ensureProfile(user, configuredAdminName || undefined)
-  const { error: roleError } = await db.from('profiles').update({ role: 'admin', name: configuredAdminName || undefined }).eq('id', user.id)
+  await ensureProfile(user, configuredName)
+  const { error: roleError } = await db.from('profiles').update({ role: 'admin', name: configuredName }).eq('id', user.id)
   if (roleError) throw roleError
 }
-
 function postPayload(post: any) { return { ...post, is_hidden: Boolean(post.is_hidden), author: post.author || '알 수 없음', category: post.category || '자유' } }
 
 async function listPosts(admin = false) {
