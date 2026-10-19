@@ -22,7 +22,7 @@ The browser receives only the public values in `frontend/.env.local`:
 ```env
 VITE_API_URL=https://ymprvqsfpwvoutwozwvn.supabase.co/functions/v1/api
 VITE_SUPABASE_URL=https://ymprvqsfpwvoutwozwvn.supabase.co
-VITE_SITE_URL=https://0915-project-ruby.vercel.app
+VITE_SITE_URL=https://onboardproject.shop
 VITE_SUPABASE_ANON_KEY=your-publishable-key
 ```
 
@@ -55,6 +55,13 @@ balances. Only the service role can call the adjustment/refund database function
 
 Public deployment addresses are centralized in `frontend/src/deploymentConfig.js`.
 Stale local or unrelated project URLs fall back to the current deployed project.
+
+The production frontend is `https://onboardproject.shop`. Supabase Auth's Site
+URL and redirect allow list must include this origin and `/auth/callback`.
+Vercel's production/preview `VITE_SITE_URL` must use the same origin. Kakao
+continues to use `https://ymprvqsfpwvoutwozwvn.supabase.co/auth/v1/callback`
+as its provider callback; Supabase then returns the user to the frontend.
+Toss success/failure URLs also use the frontend's shared `SITE_URL`.
 
 ## Monthly subscriptions
 

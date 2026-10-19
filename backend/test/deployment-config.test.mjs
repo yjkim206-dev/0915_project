@@ -12,6 +12,6 @@ test('missing and stale local environment settings resolve to the deployed proje
     const result = resolve(env)
     assert.equal(result.API_URL, 'https://ymprvqsfpwvoutwozwvn.supabase.co/functions/v1/api')
     assert.equal(result.SUPABASE_URL, 'https://ymprvqsfpwvoutwozwvn.supabase.co')
-    assert.equal(result.SITE_URL, 'https://0915-project-ruby.vercel.app')
+    assert.equal(result.SITE_URL, 'https://onboardproject.shop')
   }
 })

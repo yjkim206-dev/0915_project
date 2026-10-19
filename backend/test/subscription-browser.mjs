@@ -19,7 +19,7 @@ for (const line of readFileSync(new URL('../../.env', import.meta.url), 'utf8').
   const m = line.match(/^\s*([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/); if (m) env[m[1]] = m[2].replace(/^['"]|['"]$/g, '')
 }
 const base = 'https://ymprvqsfpwvoutwozwvn.supabase.co'
-const site = 'https://0915-project-ruby.vercel.app'
+const site = 'https://onboardproject.shop'
 const service = env.SUPABASE_SERVICE_ROLE_KEY
 const prefix = 'moa-sub-ui-' + randomUUID().slice(0, 8)
 const created = []

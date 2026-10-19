@@ -21,7 +21,7 @@ for (const line of readFileSync(new URL('../../.env', import.meta.url), 'utf8').
   const match = line.match(/^\s*([A-Za-z_][A-Za-z_0-9]*)\s*=\s*(.*)$/)
   if (match) env[match[1]] = match[2].replace(/^['"]|['"]$/g, '')
 }
-const site = 'https://0915-project-ruby.vercel.app'
+const site = 'https://onboardproject.shop'
 const base = 'https://ymprvqsfpwvoutwozwvn.supabase.co'
 const prefix = `moa-ui-${randomUUID().slice(0, 8)}`
 const created = []

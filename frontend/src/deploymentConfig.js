@@ -1,6 +1,6 @@
 // Public deployment addresses. Secrets remain in environment variables.
 const projectUrl = 'https://ymprvqsfpwvoutwozwvn.supabase.co'
-const frontendUrl = 'https://0915-project-ruby.vercel.app'
+const frontendUrl = 'https://onboardproject.shop'
 
 function deployedUrl(configured, fallback) {
   try {
