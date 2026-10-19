@@ -4,6 +4,7 @@
   "private": true,
   "description": "Supabase Edge Function backend",
   "scripts": {
+    "test": "node --test test/*.test.mjs",
     "dev": "npx supabase functions serve api --no-verify-jwt",
     "deploy": "powershell.exe -ExecutionPolicy Bypass -File supabase/deploy.ps1",
     "db:push": "npx supabase db push"

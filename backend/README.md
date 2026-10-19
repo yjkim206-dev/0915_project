@@ -26,6 +26,10 @@ VITE_SUPABASE_ANON_KEY=your-publishable-key
 
 ## Development and deployment
 
+Run `npm.cmd --prefix backend test` from the project root for offline API router
+regression checks (Node.js 22.13 or newer). These checks mock Supabase and verify
+authentication failures and asynchronous errors retain JSON and CORS responses.
+
 Run `npm.cmd run dev:backend` to serve the `api` Edge Function locally. Local
 Edge Function serving requires Docker. Deploy the database migrations and API
 function with `npm.cmd --prefix backend run deploy`.

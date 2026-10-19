@@ -552,11 +552,12 @@ async function handler(request: Request) {
       const paymentResult = await handlePaymentRoutes(path, method, request, db, requiredUser, tossSecretKey)
       if (paymentResult) return paymentResult
     }
-    if (path === '/admin/login' && method === 'POST') return handleAdminLogin(request)
-    if ((path === '/auth/login' || path === '/auth/signup') && method === 'POST') return handleAuth(path, request)
-    if (path === '/profile' && (method === 'GET' || method === 'PUT')) return handleProfile(path, request)
-    const viewMatch = path.match(/^\/posts\/(\d+)\/view$/); if (viewMatch && method === 'POST') return handleView(Number(viewMatch[1]), request)
-    const reactionMatch = path.match(/^\/posts\/(\d+)\/reactions$/); if (reactionMatch && (method === 'GET' || method === 'POST')) return handleReactions(Number(reactionMatch[1]), method, request)
+    // Await route handlers so asynchronous failures reach the shared error/CORS handler.
+    if (path === '/admin/login' && method === 'POST') return await handleAdminLogin(request)
+    if ((path === '/auth/login' || path === '/auth/signup') && method === 'POST') return await handleAuth(path, request)
+    if (path === '/profile' && (method === 'GET' || method === 'PUT')) return await handleProfile(path, request)
+    const viewMatch = path.match(/^\/posts\/(\d+)\/view$/); if (viewMatch && method === 'POST') return await handleView(Number(viewMatch[1]), request)
+    const reactionMatch = path.match(/^\/posts\/(\d+)\/reactions$/); if (reactionMatch && (method === 'GET' || method === 'POST')) return await handleReactions(Number(reactionMatch[1]), method, request)
     const commentsResult = await handleComments(path, method, request); if (commentsResult) return commentsResult
     const inquiriesResult = path.startsWith('/inquiries') ? await handleInquiries(path, method, request) : null; if (inquiriesResult) return inquiriesResult
     const noticesResult = await handleNotices(path, method); if (noticesResult) return noticesResult
