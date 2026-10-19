@@ -41,6 +41,9 @@ payment/ledger rows afterward. It never calls Toss or charges a payment.
 After deploying the frontend, run `npx.cmd --yes --package=playwright -c "node backend/test/payment-browser.mjs --allow-remote-fixtures"`
 for headless Edge checks of the profile, receipts, administrator grant/recovery
 forms, and mobile overflow. This check also creates/deletes isolated accounts.
+It signs in through the real user/admin forms, verifies rejected administrator
+access for ordinary users, exercises simulated checkout cancel/failure redirects,
+and checks payment status filters, logout guards, and unexpected local requests.
 
 The profile shows recent payments, receipts, and credit changes; full payment
 history is available at `/profile/payments`. In `/admin`, choose
