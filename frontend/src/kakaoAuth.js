@@ -1,8 +1,7 @@
 import { authStorage } from './authStorage.js'
+import { SUPABASE_URL, SITE_URL } from './deploymentConfig.js'
 
-const configuredSupabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const apiUrl = import.meta.env.VITE_API_URL
-const supabaseUrl = (configuredSupabaseUrl || apiUrl?.replace(/\/functions\/v1\/api\/?$/, ''))?.replace(/\/+$/, '')
+const supabaseUrl = SUPABASE_URL
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export function startKakaoLogin() {
@@ -18,7 +17,7 @@ export function startKakaoLogin() {
   }
 
   authorizeUrl.searchParams.set('provider', 'kakao')
-  authorizeUrl.searchParams.set('redirect_to', `${window.location.origin}/auth/callback`)
+  authorizeUrl.searchParams.set('redirect_to', `${SITE_URL}/auth/callback`)
   authorizeUrl.searchParams.set('apikey', anonKey)
   authorizeUrl.searchParams.set('flow_type', 'implicit')
   window.location.assign(authorizeUrl.toString())

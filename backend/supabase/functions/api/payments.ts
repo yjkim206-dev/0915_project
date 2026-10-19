@@ -1,4 +1,5 @@
 import type { SupabaseClient, User } from 'jsr:@supabase/supabase-js@2'
+import { orderFields, orderSummary, pagination, paymentStatuses } from './paymentHistory.ts'
 
 const products = [
   { id: 'premium_monthly', type: 'subscription', name: 'MOA Premium 월간 구독', amount: 9900, credits: 0 },
@@ -14,11 +15,11 @@ const fail = (message: string, status = 400) => json({ message }, status)
 const parseBody = async (request: Request) => { try { return await request.json() } catch { return {} } }
 const paymentAuth = (secret: string) => `Basic ${btoa(`${secret}:`)}`
 
-async function tossRequest(path: string, secret: string, body: Record<string, unknown>) {
+async function tossRequest(path: string, secret: string, body?: Record<string, unknown>, idempotencyKey?: string) {
   const response = await fetch(`https://api.tosspayments.com/v1/${path}`, {
-    method: 'POST',
-    headers: { Authorization: paymentAuth(secret), 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    method: body ? 'POST' : 'GET',
+    headers: { Authorization: paymentAuth(secret), 'Content-Type': 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
@@ -54,7 +55,7 @@ export async function handlePaymentRoutes(
     if (!product) return fail('판매 중인 상품을 찾을 수 없습니다.', 404)
     if (product.product_type !== 'credits') return fail('이 상품은 구독 카드 등록 절차로 주문해야 합니다.', 400)
     const orderId = newOrderId()
-    const { error: insertError } = await db.from('payment_orders').insert({ id: orderId, user_id: user.id, product_id: product.id, product_type: product.product_type, amount: product.amount, credits: product.credits })
+    const { error: insertError } = await db.from('payment_orders').insert({ id: orderId, user_id: user.id, product_id: product.id, product_name: product.name, product_type: product.product_type, amount: product.amount, credits: product.credits })
     if (insertError) return fail(insertError.message, 500)
     return json({ orderId, orderName: product.name, amount: product.amount, customerKey: customerKeyFor(user) }, 201)
   }
@@ -91,7 +92,7 @@ export async function handlePaymentRoutes(
     const { data: product, error: productError } = await db.from('shop_products').select('*').eq('id', 'premium_monthly').eq('is_active', true).single()
     if (productError) return fail(productError.message, 500)
     const orderId = newOrderId()
-    const { error: insertError } = await db.from('payment_orders').insert({ id: orderId, user_id: user.id, product_id: product.id, product_type: 'subscription', amount: product.amount, credits: 0 })
+    const { error: insertError } = await db.from('payment_orders').insert({ id: orderId, user_id: user.id, product_id: product.id, product_name: product.name, product_type: 'subscription', amount: product.amount, credits: 0 })
     if (insertError) return fail(insertError.message, 500)
     return json({ orderId, customerKey: customerKeyFor(user) }, 201)
   }
@@ -136,26 +137,46 @@ export async function handlePaymentRoutes(
     const user = await requiredUser(request)
     const [wallet, transactions, subscription, orders] = await Promise.all([
       db.from('credit_wallets').select('balance').eq('user_id', user.id).maybeSingle(),
-      db.from('credit_transactions').select('id,amount,description,created_at,order_id').eq('user_id', user.id).order('created_at', { ascending: false }).limit(20),
+      db.from('credit_transactions').select('id,amount,description,kind,balance_before,balance_after,created_at,order_id').eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(20),
       db.from('subscriptions').select('status,current_period_start,current_period_end,cancel_at_period_end').eq('user_id', user.id).maybeSingle(),
-      db.from('payment_orders').select('id,product_id,product_type,amount,credits,status,created_at,paid_at,canceled_at,cancel_reason,toss_payment_data').eq('user_id', user.id).order('created_at', { ascending: false }).limit(50),
+      db.from('payment_orders').select(orderFields, { count: 'exact' }).eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(5),
     ])
     const queryError = [wallet, transactions, subscription, orders].find((result) => result.error)?.error
     if (queryError) return fail(queryError.message, 500)
-    const orderRows = (orders.data || []).map((order) => ({
-      id: order.id,
-      product_id: order.product_id,
-      product_type: order.product_type,
-      amount: order.amount,
-      credits: order.credits,
-      status: order.status,
-      created_at: order.created_at,
-      paid_at: order.paid_at,
-      canceled_at: order.canceled_at,
-      cancel_reason: order.cancel_reason,
-      receipt_url: order.toss_payment_data?.receipt?.url || null,
-    }))
-    return json({ balance: wallet.data?.balance || 0, transactions: transactions.data || [], subscription: subscription.data || null, orders: orderRows })
+    return json({ balance: wallet.data?.balance || 0, transactions: transactions.data || [], subscription: subscription.data || null, orders: (orders.data || []).map(orderSummary), order_count: orders.count || 0 })
+  }
+
+  if (path === '/payments/orders' && method === 'GET') {
+    const user = await requiredUser(request)
+    const { params, page, limit, offset } = pagination(request)
+    const status = params.get('status') || 'all'
+    if (status !== 'all' && !paymentStatuses.includes(status)) return fail('올바른 결제 상태를 선택해주세요.')
+    let query = db.from('payment_orders').select(orderFields, { count: 'exact' }).eq('user_id', user.id)
+    if (status !== 'all') query = query.eq('status', status)
+    const { data, error, count } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + limit - 1)
+    if (error) return fail(error.message, 500)
+    return json({ items: (data || []).map(orderSummary), total: count || 0, page, limit })
+  }
+
+  // Only unfinished orders may be marked as closed by the checkout UI.
+  // Approved payments always require the provider-backed refund route below.
+  const closeMatch = path.match(/^\/payments\/orders\/([^/]+)\/close$/)
+  if (closeMatch && method === 'POST') {
+    const user = await requiredUser(request)
+    const input = await parseBody(request)
+    const status = input.status === 'cancelled' ? 'cancelled' : input.status === 'failed' ? 'failed' : ''
+    if (!status) return fail('취소 또는 실패 상태만 기록할 수 있습니다.')
+    const now = new Date().toISOString()
+    const reason = String(input.message || (status === 'cancelled' ? '결제창에서 취소' : '결제 실패')).slice(0, 500)
+    const values = status === 'cancelled' ? { status, cancel_reason: reason, canceled_at: now }
+      : { status, failure_code: String(input.code || '').slice(0, 100), failure_message: reason, failed_at: now }
+    const id = decodeURIComponent(closeMatch[1])
+    const { data, error } = await db.from('payment_orders').update(values).eq('id', id).eq('user_id', user.id).eq('status', 'pending').select('id,status').maybeSingle()
+    if (error) return fail(error.message, 500)
+    if (data) return json(data)
+    const { data: existing, error: readError } = await db.from('payment_orders').select('id,status').eq('id', id).eq('user_id', user.id).maybeSingle()
+    if (readError) return fail(readError.message, 500)
+    return existing ? json({ ...existing, alreadyProcessed: true }) : fail('주문을 찾을 수 없습니다.', 404)
   }
 
   const refundMatch = path.match(/^\/payments\/orders\/([^/]+)\/refund$/)
@@ -170,9 +191,20 @@ export async function handlePaymentRoutes(
     if (order.product_type !== 'credits') return fail('구독 결제는 결제내역의 구독 해지 메뉴에서 처리해 주세요.', 400)
     if (order.status === 'refunded' || order.status === 'cancelled') return json({ orderId, status: order.status, alreadyProcessed: true })
     if (order.status !== 'paid' || !order.toss_payment_key) return fail('승인 완료된 주문만 환불할 수 있습니다.', 409)
+    if (!tossSecret) return fail('결제 서비스 설정을 확인하지 못했습니다. 잠시 후 다시 시도해주세요.', 503)
+    const { data: reservation, error: reserveError } = await db.rpc('reserve_credit_refund', { p_order_id: orderId, p_reason: reason })
+    if (reserveError) return fail(reserveError.message?.includes('INSUFFICIENT_CREDIT_BALANCE') ? '크레딧 잔액이 부족하여 환불할 수 없습니다.' : '환불 준비에 실패했습니다. 잠시 후 다시 시도해주세요.', 409)
+    if (reservation.alreadyProcessed) return json({ orderId, alreadyProcessed: true })
+    const refundReason = reservation.reason || reason
     try {
-      const cancellation = await tossRequest(`payments/${encodeURIComponent(order.toss_payment_key)}/cancel`, tossSecret, { cancelReason: reason })
-      const { data, error: refundError } = await db.rpc('refund_credit_order', { p_order_id: orderId, p_cancel_reason: reason, p_cancel_data: cancellation })
+      // Query the provider first, including on retry after an ambiguous timeout.
+      // A completed provider cancellation must finalize the ledger, not release credits.
+      const providerPayment = await tossRequest(`payments/${encodeURIComponent(order.toss_payment_key)}`, tossSecret)
+      if (providerPayment.orderId !== orderId || providerPayment.totalAmount !== order.amount) return fail('결제 정보가 주문과 일치하지 않습니다. 주문번호로 문의해주세요.', 409)
+      if (!['DONE', 'PARTIAL_CANCELED', 'CANCELED'].includes(providerPayment.status)) return fail('결제 취소 상태 확인이 필요합니다. 주문번호로 문의해주세요.', 409)
+      const cancellation = providerPayment.status === 'CANCELED' ? providerPayment
+        : await tossRequest(`payments/${encodeURIComponent(order.toss_payment_key)}/cancel`, tossSecret, { cancelReason: refundReason }, reservation.requestId)
+      const { data, error: refundError } = await db.rpc('refund_credit_order', { p_order_id: orderId, p_cancel_reason: refundReason, p_cancel_data: cancellation })
       if (refundError) {
         console.error('Toss refund succeeded but credit refund record failed', refundError)
         return fail('결제 취소는 완료됐지만 포인트 원장 반영에 실패했습니다. 고객센터에 주문번호를 알려 주세요.', 500)
@@ -181,6 +213,12 @@ export async function handlePaymentRoutes(
     } catch (error) {
       console.error('Payment refund failed', error)
       const status = Number((error as { status?: number })?.status) || 500
+      // A timeout/5xx/409 can leave the cancellation in flight. Keep the
+      // reservation and reuse the same provider idempotency key on retry.
+      if (status >= 400 && status < 500 && status !== 409 && (error as { code?: string })?.code !== 'ALREADY_CANCELED_PAYMENT') {
+        const { error: releaseError } = await db.rpc('release_credit_refund', { p_order_id: orderId })
+        if (releaseError) return fail('환불 실패 후 크레딧 예약 해제에 실패했습니다. 주문번호로 문의해주세요.', 500)
+      }
       return fail(error instanceof Error ? error.message : '환불 처리에 실패했습니다.', status >= 400 && status < 500 ? 400 : 500)
     }
   }

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 import { authStorage } from './authStorage.js'
+import { paymentApi as api } from './paymentApi.js'
+import { SITE_URL } from './deploymentConfig.js'
 import './toss-payments.css'
 
 const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
 
 function loadTossSdk() {
   if (window.TossPayments) return Promise.resolve(window.TossPayments)
@@ -22,19 +23,11 @@ function money(value) {
   return `${Number(value).toLocaleString('ko-KR')}원`
 }
 
-async function api(path, options = {}) {
-  const token = authStorage.getItem('token')
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: {
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  })
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.message || '결제 요청을 처리하지 못했습니다.')
-  return data
+async function recordCheckoutClosure(orderId, error) {
+  if (!orderId) return
+  const code = String(error.code || '')
+  const status = ['PAY_PROCESS_CANCELED', 'USER_CANCEL'].includes(code) ? 'cancelled' : 'failed'
+  return api(`/payments/orders/${encodeURIComponent(orderId)}/close`, { method: 'POST', body: JSON.stringify({ status, code, message: error.message || '결제창이 종료되었습니다.' }) })
 }
 
 export default function TossPaymentsPage() {
@@ -60,6 +53,7 @@ export default function TossPaymentsPage() {
           const result = await api('/payments/confirm', { method: 'POST', body: JSON.stringify({ paymentKey: params.get('paymentKey'), orderId: params.get('orderId'), amount: Number(params.get('amount')) }) })
           if (!active) return
           setNotice(`${Number(result.credits).toLocaleString('ko-KR')}P 적립 완료 · 현재 잔액 ${Number(result.balance).toLocaleString('ko-KR')}P`)
+          sessionStorage.removeItem('moa-credit-order-id')
           await refreshAccount()
           window.history.replaceState({}, document.title, '/shop')
         } else if (path === '/shop/subscription/success') {
@@ -73,7 +67,11 @@ export default function TossPaymentsPage() {
           await refreshAccount()
           window.history.replaceState({}, document.title, '/shop')
         } else if (path === '/shop/fail') {
+          const orderId = params.get('checkoutOrderId') || params.get('orderId') || sessionStorage.getItem(params.get('flow') === 'subscription' ? 'moa-billing-order-id' : 'moa-credit-order-id')
+          await recordCheckoutClosure(orderId, { code: params.get('code'), message: params.get('message') })
           sessionStorage.removeItem('moa-billing-order-id')
+          sessionStorage.removeItem('moa-credit-order-id')
+          await refreshAccount()
           if (active) setNotice(params.get('message') || '결제가 취소되었거나 실패했습니다.')
           window.history.replaceState({}, document.title, '/shop')
         }
@@ -94,35 +92,48 @@ export default function TossPaymentsPage() {
   }
 
   const subscribe = async () => {
+    let orderId
     try {
       setBusy(true); setNotice('')
       const TossPayments = await ready()
       const order = await api('/payments/subscriptions/orders', { method: 'POST', body: '{}' })
+      orderId = order.orderId
       sessionStorage.setItem('moa-billing-order-id', order.orderId)
       const payment = TossPayments(clientKey).payment({ customerKey: order.customerKey })
       await payment.requestBillingAuth({
         method: 'CARD',
-        successUrl: `${window.location.origin}/shop/subscription/success`,
-        failUrl: `${window.location.origin}/shop/fail?flow=subscription`,
+        successUrl: `${SITE_URL}/shop/subscription/success`,
+        failUrl: `${SITE_URL}/shop/fail?flow=subscription&checkoutOrderId=${encodeURIComponent(order.orderId)}`,
       })
-    } catch (error) { setNotice(error.message); setBusy(false) }
+    } catch (error) {
+      let recordError = ''
+      if (orderId && error.code) { try { await recordCheckoutClosure(orderId, error) } catch (caught) { recordError = ` 내역 기록 실패: ${caught.message}` } }
+      setNotice(error.message + recordError); setBusy(false); await refreshAccount()
+    }
   }
 
   const buyCredits = async (item) => {
+    let orderId
     try {
       setBusy(true); setNotice('')
       const TossPayments = await ready()
       const order = await api('/payments/orders', { method: 'POST', body: JSON.stringify({ productId: item.id }) })
+      orderId = order.orderId
+      sessionStorage.setItem('moa-credit-order-id', order.orderId)
       const payment = TossPayments(clientKey).payment({ customerKey: order.customerKey })
       await payment.requestPayment({
         method: 'CARD',
         amount: { currency: 'KRW', value: order.amount },
         orderId: order.orderId,
         orderName: order.orderName,
-        successUrl: `${window.location.origin}/shop/credits/success`,
-        failUrl: `${window.location.origin}/shop/fail?flow=credits`,
+        successUrl: `${SITE_URL}/shop/credits/success`,
+        failUrl: `${SITE_URL}/shop/fail?flow=credits&checkoutOrderId=${encodeURIComponent(order.orderId)}`,
       })
-    } catch (error) { setNotice(error.message); setBusy(false) }
+    } catch (error) {
+      let recordError = ''
+      if (orderId && error.code) { try { await recordCheckoutClosure(orderId, error) } catch (caught) { recordError = ` 내역 기록 실패: ${caught.message}` } }
+      setNotice(error.message + recordError); setBusy(false); await refreshAccount()
+    }
   }
 
   const cancelSubscription = async () => {

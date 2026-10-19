@@ -1,76 +1,88 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { authStorage } from './authStorage.js'
+import { paymentApi, formatPaymentDate, formatMoney, formatPoints, transactionNames } from './paymentApi.js'
+import { PaymentHistory, PaymentPagination, PaymentStatusFilter } from './PaymentHistory.jsx'
 import './toss-payments.css'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
-
-async function request(path, options = {}) {
-  const response = await fetch(`${API}${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${authStorage.getItem('token') || ''}`,
-      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      ...options.headers,
-    },
-  })
-  const data = await response.json().catch(() => ({}))
-  if (!response.ok) throw new Error(data.message || '결제 정보를 불러오지 못했습니다.')
-  return data
-}
-
-const formatDate = (value) => value ? new Date(value).toLocaleString('ko-KR') : '-'
-const formatMoney = (value) => `${Number(value).toLocaleString('ko-KR')}원`
-const statusNames = { pending: '결제 대기', paid: '승인 완료', failed: '실패', cancelled: '취소', refunded: '환불 완료' }
-
-export default function PaymentCenter() {
+export default function PaymentCenter({ embedded = false }) {
   const [data, setData] = useState(null)
+  const [history, setHistory] = useState({ items: [], total: 0, limit: 10 })
   const [filter, setFilter] = useState('all')
+  const [page, setPage] = useState(1)
+  const [revision, setRevision] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [busyOrder, setBusyOrder] = useState('')
   const [notice, setNotice] = useState('')
 
-  const refresh = useCallback(async () => setData(await request('/payments/account')), [])
-  useEffect(() => { refresh().catch((error) => setNotice(error.message)) }, [refresh])
+  useEffect(() => {
+    let active = true
+    Promise.all([
+      paymentApi('/payments/account'),
+      embedded ? Promise.resolve(null) : paymentApi(`/payments/orders?page=${page}&limit=10&status=${filter}`),
+    ]).then(([account, orders]) => {
+      if (!active) return
+      setData(account); if (orders) setHistory(orders); setError('')
+    }).catch((caught) => { if (active) setError(caught.message) }).finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [embedded, page, filter, revision])
 
+  useEffect(() => {
+    const refresh = () => setRevision((value) => value + 1)
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
+  }, [])
+
+  const refresh = () => { setLoading(true); setRevision((value) => value + 1) }
+  const changePage = (value) => { setPage(value); setLoading(true) }
   const cancelSubscription = async () => {
-    if (!window.confirm('현재 결제 기간이 끝나는 날 구독을 해지할까요?')) return
+    if (!window.confirm('현재 이용 기간이 끝나는 날 구독이 종료되도록 예약할까요? 이미 결제된 금액의 환불과는 별개입니다.')) return
     try {
-      setNotice(''); setBusyOrder('subscription')
-      const result = await request('/payments/subscriptions/cancel', { method: 'POST', body: '{}' })
-      setNotice(`${formatDate(result.current_period_end)}에 구독이 종료되도록 예약했습니다.`)
-      await refresh()
-    } catch (error) { setNotice(error.message) } finally { setBusyOrder('') }
+      setBusyOrder('subscription'); setNotice('')
+      const result = await paymentApi('/payments/subscriptions/cancel', { method: 'POST', body: '{}' })
+      setNotice(`${formatPaymentDate(result.current_period_end)}에 구독이 종료되도록 예약했습니다.`); refresh()
+    } catch (caught) { setNotice(caught.message) } finally { setBusyOrder('') }
   }
-
   const refundOrder = async (order) => {
-    if (!window.confirm(`${formatMoney(order.amount)} 결제를 취소하고 ${Number(order.credits).toLocaleString('ko-KR')}P를 회수할까요? 포인트를 이미 사용해 잔액이 부족하면 환불이 거절됩니다.`)) return
+    if (!window.confirm(`${formatMoney(order.amount)} 결제를 환불하고 ${formatPoints(order.credits)}를 회수할까요?`)) return
     try {
-      setNotice(''); setBusyOrder(order.id)
-      const result = await request(`/payments/orders/${encodeURIComponent(order.id)}/refund`, { method: 'POST', body: JSON.stringify({ reason: '고객 요청 환불' }) })
-      setNotice(result.alreadyProcessed ? '이미 취소된 주문입니다.' : `결제가 취소되고 ${Number(result.refundedCredits).toLocaleString('ko-KR')}P가 회수됐습니다.`)
-      await refresh()
-    } catch (error) { setNotice(error.message) } finally { setBusyOrder('') }
+      setBusyOrder(order.id); setNotice('')
+      const result = await paymentApi(`/payments/orders/${encodeURIComponent(order.id)}/refund`, { method: 'POST', body: JSON.stringify({ reason: '고객 요청 환불' }) })
+      setNotice(result.alreadyProcessed ? '이미 취소·환불된 주문입니다.' : '환불 처리됐습니다. 결제내역과 크레딧 잔액을 확인해주세요.'); refresh()
+    } catch (caught) { setNotice(caught.message) } finally { setBusyOrder('') }
+  }
+  const cancelOrder = async (order) => {
+    if (!window.confirm('아직 결제가 승인되지 않은 주문을 취소할까요? 진행 중인 결제창이 있다면 먼저 닫아주세요.')) return
+    try {
+      setBusyOrder(order.id); setNotice('')
+      const result = await paymentApi(`/payments/orders/${encodeURIComponent(order.id)}/close`, { method: 'POST', body: JSON.stringify({ status: 'cancelled', message: '사용자가 미결제 주문 취소' }) })
+      setNotice(result.status === 'cancelled' ? '미결제 주문을 취소했습니다.' : '주문 상태가 변경되어 취소하지 않았습니다. 최신 내역을 확인해주세요.'); refresh()
+    } catch (caught) { setNotice(caught.message) } finally { setBusyOrder('') }
   }
 
-  if (!data && !notice) return <div className="container narrow"><p className="empty">결제 정보를 불러오는 중...</p></div>
-  const rows = (data?.orders || []).filter((order) => filter === 'all' || order.status === filter)
   const subscription = data?.subscription
-
-  return <div className="container narrow payment-center">
-    <Link className="back" to="/profile">← 프로필로 돌아가기</Link>
-    <div className="title"><p className="eyebrow">MY ACCOUNT</p><h1>구독 · 크레딧 · 결제내역</h1><p>보유 포인트, 구독 상태, 승인 및 환불 내역을 확인하세요.</p></div>
+  const activeSubscription = subscription?.status === 'active' && new Date(subscription.current_period_end) > new Date()
+  const rows = embedded ? data?.orders || [] : history.items
+  const content = <>
+    <div className="payment-history-heading"><div><p className="eyebrow">MY PAYMENTS</p>{embedded ? <h2>내 결제정보</h2> : <h1>구독 · 크레딧 · 결제내역</h1>}<p>구매, 취소·환불, 영수증과 크레딧 변동을 확인하세요.</p></div><button type="button" className="payment-refresh" onClick={refresh} disabled={loading || Boolean(busyOrder)}>새로고침</button></div>
     {notice && <div className="shop-notice" role="status">{notice}</div>}
+    {error && <div className="shop-notice warning" role="alert">결제정보를 불러오지 못했습니다: {error} <button type="button" className="payment-refresh" onClick={refresh}>다시 시도</button></div>}
+    {loading && <p className="payment-loading" role="status">결제정보를 불러오는 중…</p>}
     {data && <>
-      <section className="payment-summary-grid">
-        <article className="payment-summary-card"><span>보유 크레딧</span><strong>{Number(data.balance).toLocaleString('ko-KR')}P</strong><small>포인트 결제 내역과 함께 표시됩니다.</small></article>
-        <article className="payment-summary-card"><span>구독 상태</span><strong>{subscription?.status === 'active' ? (subscription.cancel_at_period_end ? '해지 예약' : '이용 중') : '구독 없음'}</strong><small>{subscription?.status === 'active' ? `다음 결제일 ${new Date(subscription.current_period_end).toLocaleDateString('ko-KR')}` : '상점에서 프리미엄을 구독할 수 있습니다.'}</small></article>
+      <section className="payment-summary-grid" aria-label="결제 요약">
+        <article className="payment-summary-card"><span>보유 크레딧</span><strong>{formatPoints(data.balance)}</strong><small>충전·관리자 지급·회수가 반영된 잔액</small></article>
+        <article className="payment-summary-card"><span>구독 상태</span><strong>{activeSubscription ? (subscription.cancel_at_period_end ? '해지 예약' : '이용 중') : '구독 없음'}</strong><small>{activeSubscription ? `이용 종료일 ${formatPaymentDate(subscription.current_period_end)}` : '상점에서 프리미엄을 구독할 수 있습니다.'}</small></article>
       </section>
-      {subscription?.status === 'active' && !subscription.cancel_at_period_end && <div className="payment-action-row"><span>구독은 현재 이용 기간까지 유지됩니다.</span><button type="button" className="shop-button secondary" disabled={Boolean(busyOrder)} onClick={cancelSubscription}>{busyOrder === 'subscription' ? '처리 중…' : '구독 해지 예약'}</button></div>}
-      {subscription?.cancel_at_period_end && <div className="shop-notice warning">구독 해지가 예약되어 있습니다. 현재 기간 종료일은 {formatDate(subscription.current_period_end)}입니다.</div>}
-      <section className="payment-history-section"><div className="payment-history-heading"><div><p className="eyebrow">PAYMENT HISTORY</p><h2>결제내역</h2></div><label>상태 <select value={filter} onChange={(event) => setFilter(event.target.value)}><option value="all">전체</option><option value="pending">대기</option><option value="paid">승인 완료</option><option value="failed">실패</option><option value="refunded">환불</option><option value="cancelled">취소</option></select></label></div>
-        {rows.length ? <div className="payment-history-list">{rows.map((order) => <article className="payment-history-row" key={order.id}><div className="payment-history-main"><div><strong>{order.product_type === 'subscription' ? 'MOA Premium 월간 구독' : order.product_id === 'credits_1000' ? '포인트 1,000P 충전' : '포인트 5,500P 충전'}</strong><span className={`payment-status ${order.status}`}>{statusNames[order.status] || order.status}</span></div><small>{formatDate(order.paid_at || order.created_at)} · 주문번호 {order.id}</small></div><div className="payment-history-side"><strong>{formatMoney(order.amount)}</strong><div className="payment-history-actions">{order.receipt_url && <a className="payment-receipt-link" href={order.receipt_url} target="_blank" rel="noreferrer">영수증 보기</a>}{order.product_type === 'credits' && order.status === 'paid' && <button type="button" className="payment-refund-button" disabled={Boolean(busyOrder)} onClick={() => refundOrder(order)}>{busyOrder === order.id ? '처리 중…' : '결제 취소·환불'}</button>}</div></div></article>)}</div> : <p className="payment-empty">선택한 상태의 결제 내역이 없습니다.</p>}
+      {activeSubscription && !subscription.cancel_at_period_end && <div className="payment-action-row"><span>구독 해지 예약은 기존 결제의 환불과 다릅니다.</span><button type="button" className="shop-button secondary" disabled={Boolean(busyOrder)} onClick={cancelSubscription}>구독 해지 예약</button></div>}
+      {activeSubscription && subscription.cancel_at_period_end && <p className="shop-notice warning">구독 해지 예약일: {formatPaymentDate(subscription.current_period_end)}</p>}
+      <section className="payment-history-section" aria-busy={loading}>
+        <div className="payment-history-heading"><h2>{embedded ? '최근 구매·취소·환불 내역' : '전체 결제내역'}</h2>{embedded ? <Link className="text-link" to="/profile/payments">전체 {data.order_count || 0}건 보기 →</Link> : <PaymentStatusFilter value={filter} disabled={loading} onChange={(value) => { setFilter(value); setPage(1); setLoading(true) }} />}</div>
+        {!loading && !error && (rows.length ? <PaymentHistory orders={rows} busy={busyOrder} onRefund={refundOrder} onCancel={cancelOrder} /> : <p className="payment-empty">{filter === 'all' ? '아직 결제내역이 없습니다.' : '선택한 상태의 결제내역이 없습니다.'}</p>)}
+        {!embedded && !error && <PaymentPagination page={page} total={history.total} limit={history.limit} disabled={loading} onChange={changePage} />}
       </section>
+      <section className="payment-ledger"><h2>최근 크레딧 변동 내역</h2><p>구매 적립과 환불, 관리자 지급·회수를 최신 20건까지 표시합니다.</p>{data.transactions.length ? <ul>{data.transactions.map((item) => <li key={item.id}><div><strong>{transactionNames[item.kind] || '크레딧 변동'}</strong><span>{item.description}</span><small>{formatPaymentDate(item.created_at)}</small></div><div><strong className={Number(item.amount) > 0 ? 'credit-plus' : 'credit-minus'}>{Number(item.amount) > 0 ? '+' : ''}{formatPoints(item.amount)}</strong>{item.balance_after != null && <small>처리 후 {formatPoints(item.balance_after)}</small>}</div></li>)}</ul> : <p className="payment-empty">크레딧 변동 내역이 없습니다.</p>}</section>
     </>}
-    <div className="payment-center-footer"><Link to="/shop" className="shop-button primary">상점에서 상품 보기</Link><p>환불은 Toss 결제 취소를 완료한 뒤 잔여 크레딧을 회수합니다. 이미 사용한 크레딧 때문에 잔액이 부족하면 자동 환불이 제한됩니다.</p></div>
-  </div>
+    <div className="payment-center-footer"><Link to="/shop" className="shop-button primary">상점에서 상품 보기</Link>{embedded && <Link to="/profile/payments" className="text-link">결제내역 자세히 보기 →</Link>}<p>미결제 주문 취소에는 환불이 발생하지 않습니다. 승인된 크레딧 구매의 환불은 결제 취소와 크레딧 회수를 함께 처리합니다.</p></div>
+  </>
+  return embedded ? <section className="profile-payments">{content}</section> : <div className="container narrow payment-center"><Link className="back" to="/profile">← 프로필로 돌아가기</Link>{content}</div>
 }

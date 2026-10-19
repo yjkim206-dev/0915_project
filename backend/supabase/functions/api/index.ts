@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient, type User } from 'jsr:@supabase/supabase-js@2'
 import { handlePaymentRoutes } from './payments.ts'
+import { handleAdminPaymentRoutes } from './adminPayments.ts'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -561,6 +562,7 @@ async function handler(request: Request) {
     const commentsResult = await handleComments(path, method, request); if (commentsResult) return commentsResult
     const inquiriesResult = path.startsWith('/inquiries') ? await handleInquiries(path, method, request) : null; if (inquiriesResult) return inquiriesResult
     const noticesResult = await handleNotices(path, method); if (noticesResult) return noticesResult
+    if (path === '/admin/payments' || path.startsWith('/admin/credits/')) return await handleAdminPaymentRoutes(path, method, request, db, adminUser)
     const reportsResult = path.startsWith('/reports') ? await handleReports(path, method, request) : null; if (reportsResult) return reportsResult
     const adminUsersResult = path.startsWith('/admin/users') ? await handleAdminUsers(path, method, request) : null; if (adminUsersResult) return adminUsersResult
     const adminResult = path.startsWith('/admin/') ? await handleAdmin(path, method, request) : null; if (adminResult) return adminResult

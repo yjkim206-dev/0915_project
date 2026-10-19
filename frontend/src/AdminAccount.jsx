@@ -3,7 +3,8 @@ import { authStorage } from './authStorage.js'
 import './admin-account.css'
 import { apiFetch as fetch } from './api.js'
 
-const API = `${import.meta.env.VITE_API_URL || 'http://localhost:3000/api'}/admin/account`
+import { API_URL } from './deploymentConfig.js'
+const API = `${API_URL}/admin/account`
 
 export default function AdminAccount() {
   const [form, setForm] = useState({ name: '', email: '', profileImage: '', currentPassword: '', newPassword: '', confirmPassword: '' })

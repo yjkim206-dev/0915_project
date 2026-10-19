@@ -1,5 +1,7 @@
+import { API_URL } from './deploymentConfig.js'
+
 const publicApiKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-const API = import.meta.env.VITE_API_URL || 'http://localhost:3000/api'
+const API = API_URL
 
 export function apiFetch(url, options = {}) {
   const headers = new Headers(options.headers || {})
