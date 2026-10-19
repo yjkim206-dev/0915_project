@@ -105,6 +105,14 @@ test('insufficient recovery returns a conflict without claiming success', async 
   assert.equal(result.status, 409)
 })
 
+test('administrator member search preserves dots in email addresses', async () => {
+  const route = loadModule('adminPayments.ts', 'handleAdminPaymentRoutes')
+  const db = fakeDb({ profiles: { data: [], count: 0 } })
+  const response = await route('/admin/credits/users', 'GET', request('/admin/credits/users?search=member%40example.com'), db, async () => ({ user: { id: actorId } }))
+  assert.equal(response.status, 200)
+  assert.equal(db.calls[0].or, 'name.ilike.%member@example.com%,email.ilike.%member@example.com%')
+})
+
 test('refund cannot call the processor before reserving sufficient credits', async () => {
   let externalCalls = 0
   const route = loadModule('payments.ts', 'handlePaymentRoutes', { fetch: async () => { externalCalls++; throw new Error('Unexpected call') } })

@@ -35,7 +35,7 @@ export async function handleAdminPaymentRoutes(path: string, method: string, req
     const search = (params.get('search') || '').trim().slice(0, 100)
     if (search) {
       // Strip PostgREST filter operators, preserving ordinary Korean/email text.
-      const term = search.replace(/[%_(),.*"\\]/g, '')
+      const term = search.replace(/[%_(),*"\\]/g, '')
       if (term) query = query.or(`name.ilike.%${term}%,email.ilike.%${term}%`)
     }
     const { data, count, error } = await query.order('created_at', { ascending: false }).order('id', { ascending: false }).range(offset, offset + limit - 1)
