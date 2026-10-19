@@ -1,5 +1,6 @@
 import type { SupabaseClient, User } from 'jsr:@supabase/supabase-js@2'
-import { orderFields, orderSummary, pagination, paymentStatuses } from './paymentHistory.ts'
+import { orderFields, orderSummary, pagination, paymentStatuses, subscriptionFields, subscriptionSummary } from './paymentHistory.ts'
+import { tossRequest } from './provider.ts'
 
 const products = [
   { id: 'premium_monthly', type: 'subscription', name: 'MOA Premium 월간 구독', amount: 9900, credits: 0 },
@@ -13,22 +14,6 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 })
 const fail = (message: string, status = 400) => json({ message }, status)
 const parseBody = async (request: Request) => { try { return await request.json() } catch { return {} } }
-const paymentAuth = (secret: string) => `Basic ${btoa(`${secret}:`)}`
-
-async function tossRequest(path: string, secret: string, body?: Record<string, unknown>, idempotencyKey?: string) {
-  const response = await fetch(`https://api.tosspayments.com/v1/${path}`, {
-    method: body ? 'POST' : 'GET',
-    headers: { Authorization: paymentAuth(secret), 'Content-Type': 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  const payload = await response.json().catch(() => ({}))
-  if (!response.ok) {
-    const error = new Error(payload.message || 'Toss 결제 요청에 실패했습니다.')
-    Object.assign(error, { status: response.status, code: payload.code })
-    throw error
-  }
-  return payload
-}
 
 function customerKeyFor(user: User) { return `moa_${user.id.replaceAll('-', '')}` }
 function newOrderId() { return `MOA_${crypto.randomUUID().replaceAll('-', '')}` }
@@ -84,66 +69,19 @@ export async function handlePaymentRoutes(
     }
   }
 
-  if (path === '/payments/subscriptions/orders' && method === 'POST') {
-    const user = await requiredUser(request)
-    const { data: active, error: activeError } = await db.from('subscriptions').select('id,status').eq('user_id', user.id).eq('status', 'active').maybeSingle()
-    if (activeError) return fail(activeError.message, 500)
-    if (active) return fail('이미 활성 구독이 있습니다.', 409)
-    const { data: product, error: productError } = await db.from('shop_products').select('*').eq('id', 'premium_monthly').eq('is_active', true).single()
-    if (productError) return fail(productError.message, 500)
-    const orderId = newOrderId()
-    const { error: insertError } = await db.from('payment_orders').insert({ id: orderId, user_id: user.id, product_id: product.id, product_name: product.name, product_type: 'subscription', amount: product.amount, credits: 0 })
-    if (insertError) return fail(insertError.message, 500)
-    return json({ orderId, customerKey: customerKeyFor(user) }, 201)
-  }
-
-  if (path === '/payments/subscriptions/activate' && method === 'POST') {
-    const user = await requiredUser(request)
-    const input = await parseBody(request)
-    const authKey = String(input.authKey || '')
-    const orderId = String(input.orderId || '')
-    if (!authKey || authKey.length > 300 || !orderId) return fail('카드 인증 정보가 올바르지 않습니다.')
-    const { data: order, error: orderError } = await db.from('payment_orders').select('*').eq('id', orderId).eq('user_id', user.id).maybeSingle()
-    if (orderError) return fail(orderError.message, 500)
-    if (!order || order.product_type !== 'subscription') return fail('구독 주문을 찾을 수 없습니다.', 404)
-    if (order.status === 'paid') return fail('이미 처리된 구독 주문입니다.', 409)
-    const customerKey = customerKeyFor(user)
-    try {
-      const billing = await tossRequest('billing/authorizations/issue', tossSecret, { authKey, customerKey })
-      const payment = await tossRequest(`billing/${encodeURIComponent(billing.billingKey)}`, tossSecret, {
-        customerKey,
-        amount: order.amount,
-        orderId,
-        orderName: 'MOA Premium 월간 구독 첫 결제',
-        customerEmail: user.email,
-      })
-      const { data, error: settleError } = await db.rpc('settle_subscription_order', {
-        p_order_id: orderId,
-        p_customer_key: customerKey,
-        p_billing_key: billing.billingKey,
-        p_payment_key: payment.paymentKey || orderId,
-        p_payment_data: payment,
-      })
-      if (settleError) throw settleError
-      return json(data)
-    } catch (error) {
-      console.error('Subscription activation failed', error)
-      const status = Number((error as { status?: number })?.status) || 500
-      return fail(error instanceof Error ? error.message : '구독 활성화에 실패했습니다.', status >= 400 && status < 500 ? 400 : 500)
-    }
-  }
-
   if (path === '/payments/account' && method === 'GET') {
     const user = await requiredUser(request)
     const [wallet, transactions, subscription, orders] = await Promise.all([
       db.from('credit_wallets').select('balance').eq('user_id', user.id).maybeSingle(),
       db.from('credit_transactions').select('id,amount,description,kind,balance_before,balance_after,created_at,order_id').eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(20),
-      db.from('subscriptions').select('status,current_period_start,current_period_end,cancel_at_period_end').eq('user_id', user.id).maybeSingle(),
+      db.from('subscriptions').select(subscriptionFields).eq('user_id', user.id).maybeSingle(),
       db.from('payment_orders').select(orderFields, { count: 'exact' }).eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(5),
     ])
     const queryError = [wallet, transactions, subscription, orders].find((result) => result.error)?.error
     if (queryError) return fail(queryError.message, 500)
-    return json({ balance: wallet.data?.balance || 0, transactions: transactions.data || [], subscription: subscription.data || null, orders: (orders.data || []).map(orderSummary), order_count: orders.count || 0 })
+    const { data: events, error: eventError } = await db.from('subscription_events').select('id,event_type,description,created_at,order_id').eq('user_id', user.id).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(20)
+    if (eventError) return fail(eventError.message, 500)
+    return json({ balance: wallet.data?.balance || 0, transactions: transactions.data || [], subscription: subscriptionSummary(subscription.data), subscription_events: events || [], orders: (orders.data || []).map(orderSummary), order_count: orders.count || 0 })
   }
 
   if (path === '/payments/orders' && method === 'GET') {
@@ -172,7 +110,7 @@ export async function handlePaymentRoutes(
       : { status, failure_code: String(input.code || '').slice(0, 100), failure_message: reason, failed_at: now }
     const id = decodeURIComponent(closeMatch[1])
     const { data, error } = await db.from('payment_orders').update(values).eq('id', id).eq('user_id', user.id).eq('status', 'pending').select('id,status').maybeSingle()
-    if (error) return fail(error.message, 500)
+    if (error) return fail(error.message?.includes('PAYMENT_IN_PROGRESS') ? '결제 승인을 확인 중입니다. 잠시 후 주문 상태를 확인해주세요.' : error.message, error.message?.includes('PAYMENT_IN_PROGRESS') ? 409 : 500)
     if (data) return json(data)
     const { data: existing, error: readError } = await db.from('payment_orders').select('id,status').eq('id', id).eq('user_id', user.id).maybeSingle()
     if (readError) return fail(readError.message, 500)
@@ -221,14 +159,6 @@ export async function handlePaymentRoutes(
       }
       return fail(error instanceof Error ? error.message : '환불 처리에 실패했습니다.', status >= 400 && status < 500 ? 400 : 500)
     }
-  }
-
-  if (path === '/payments/subscriptions/cancel' && method === 'POST') {
-    const user = await requiredUser(request)
-    const { data, error } = await db.from('subscriptions').update({ cancel_at_period_end: true, updated_at: new Date().toISOString() }).eq('user_id', user.id).eq('status', 'active').select('status,current_period_end,cancel_at_period_end').maybeSingle()
-    if (error) return fail(error.message, 500)
-    if (!data) return fail('활성 구독을 찾을 수 없습니다.', 404)
-    return json(data)
   }
 
   return null

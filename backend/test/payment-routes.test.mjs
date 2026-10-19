@@ -13,10 +13,10 @@ const request = (path, body, method = body ? 'POST' : 'GET') => new Request(`htt
 })
 
 function loadModule(file, exposed, overrides = {}) {
-  const source = ['paymentHistory.ts', file].filter(Boolean).map((name) => stripTypeScriptTypes(
+  const source = ['provider.ts', 'paymentHistory.ts', file].filter(Boolean).map((name) => stripTypeScriptTypes(
     readFileSync(new URL(`../supabase/functions/api/${name}`, import.meta.url), 'utf8').replace(/^import .*$/gm, '').replace(/^export /gm, ''),
   )).join('\n')
-  return runInNewContext(`${source}\n;${exposed}`, { Request, Response, URL, Error, crypto, btoa, console: { error() {} }, ...overrides })
+  return runInNewContext(`${source}\n;${exposed}`, { Request, Response, URL, Error, crypto, btoa, AbortSignal, console: { error() {} }, ...overrides })
 }
 
 function fakeDb(results) {

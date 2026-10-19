@@ -1,11 +1,14 @@
 import { createClient, type SupabaseClient, type User } from 'jsr:@supabase/supabase-js@2'
 import { handlePaymentRoutes } from './payments.ts'
 import { handleAdminPaymentRoutes } from './adminPayments.ts'
+import { handleSubscriptionRoutes, runSubscriptionRenewals } from './subscriptions.ts'
+import { subscriptionFields, subscriptionSummary } from './paymentHistory.ts'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
 const tossSecretKey = Deno.env.get('TOSS_SECRET_KEY') || ''
+const subscriptionCronSecret = Deno.env.get('SUBSCRIPTION_CRON_SECRET') || ''
 const configuredAdminName = Deno.env.get('ADMIN_NAME')?.trim() || ''
 const configuredAdminEmail = Deno.env.get('ADMIN_EMAIL')?.trim().toLowerCase() || ''
 const configuredAdminPassword = Deno.env.get('ADMIN_PASSWORD') || ''
@@ -520,6 +523,10 @@ async function handleAdminUsers(path: string, method: string, request: Request) 
     for (const account of accountsResult.data || []) rows.set(account.id, { ...account, name: account.email?.split('@')[0] || '사용자', role: 'user' })
     for (const item of profilesResult.data || []) rows.set(item.id, { ...rows.get(item.id), ...item, name: item.display_name || item.name || rows.get(item.id)?.name || item.email?.split('@')[0] || '사용자', role: item.role || 'user' })
     for (const admin of adminsResult.data || []) rows.set(admin.id, { ...rows.get(admin.id), ...admin, name: admin.display_name || admin.name || rows.get(admin.id)?.name || admin.email?.split('@')[0] || '관리자', role: 'admin' })
+    const ids = [...rows.keys()]
+    const subscriptions = ids.length ? await db.from('subscriptions').select(subscriptionFields).in('user_id', ids) : { data: [], error: null }
+    if (subscriptions.error) return error(subscriptions.error.message, 500)
+    for (const row of subscriptions.data || []) { const account = rows.get(row.user_id); if (account) account.subscription = subscriptionSummary(row) }
     return json([...rows.values()].sort((a, b) => Number(b.role === 'admin') - Number(a.role === 'admin') || String(b.created_at || '').localeCompare(String(a.created_at || ''))))
   }
   const match = path.match(/^\/admin\/users\/([^/]+)$/)
@@ -548,6 +555,8 @@ async function handler(request: Request) {
   const url = new URL(request.url); const path = url.pathname.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '') || '/'; const method = request.method
   try {
     if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running', admin_configured: Boolean(configuredAdminName && configuredAdminEmail && configuredAdminPassword) })
+    if (path === '/internal/subscriptions/renew' && method === 'POST') return await runSubscriptionRenewals(request, db, tossSecretKey, subscriptionCronSecret)
+    if (path.startsWith('/payments/subscriptions/') || path.startsWith('/admin/subscriptions/')) return await handleSubscriptionRoutes(path, method, request, db, requiredUser, adminUser, tossSecretKey)
     if (path === '/shop/products' || path.startsWith('/payments/')) {
       if (['/payments/confirm', '/payments/subscriptions/activate'].includes(path) && !tossSecretKey) return error('Toss 결제 시크릿 키가 서버에 설정되지 않았습니다.', 503)
       const paymentResult = await handlePaymentRoutes(path, method, request, db, requiredUser, tossSecretKey)

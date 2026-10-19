@@ -3,12 +3,14 @@ import { paymentApi, formatPoints, formatPaymentDate, transactionNames } from '.
 import { PaymentHistory, PaymentPagination, PaymentStatusFilter } from './PaymentHistory.jsx'
 import './toss-payments.css'
 import './admin-payments.css'
+import SubscriptionPanel from './SubscriptionPanel.jsx'
 
 const adminApi = (path, options = {}) => paymentApi(path, { ...options, admin: true })
 
 export default function AdminPayments({ initialUserId = '' }) {
   const [userId, setUserId] = useState(initialUserId)
   const [selectedUser, setSelectedUser] = useState(null)
+  const [subscriptionInfo, setSubscriptionInfo] = useState(null)
   const [search, setSearch] = useState('')
   const [searchTerm, setSearchTerm] = useState('')
   const [users, setUsers] = useState({ items: [], total: 0, limit: 10 })
@@ -46,9 +48,10 @@ export default function AdminPayments({ initialUserId = '' }) {
       adminApi(`/admin/payments?page=${page}&limit=10&status=${status}${query}`),
       adminApi(`/admin/credits/transactions?page=${ledgerPage}&limit=10${query}`),
       userId ? adminApi(`/admin/credits/users?userId=${encodeURIComponent(userId)}`) : Promise.resolve(null),
-    ]).then(([payments, transactions, account]) => {
+      userId ? adminApi(`/admin/subscriptions/users/${encodeURIComponent(userId)}`) : Promise.resolve(null),
+    ]).then(([payments, transactions, account, subscriptions]) => {
       if (!active) return
-      setOrders(payments); setLedger(transactions); setSelectedUser(account?.items[0] || null); setError('')
+      setOrders(payments); setLedger(transactions); setSelectedUser(account?.items[0] || null); setSubscriptionInfo(subscriptions); setError('')
     }).catch((caught) => { if (active) setError(caught.message) }).finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [userId, page, ledgerPage, status, revision])
@@ -74,6 +77,28 @@ export default function AdminPayments({ initialUserId = '' }) {
       setAmount(''); setReason(''); refresh()
     } catch (caught) { setNotice(caught.message) } finally { setBusy(false) }
   }
+  const changeSubscription = async (action) => {
+    if (!selectedUser || busy) return
+    const reason = window.prompt(action === 'cancel' ? '자동갱신 해지 예약 사유를 입력해주세요.' : '해지 예약 철회 사유를 입력해주세요.')
+    if (reason === null) return
+    if (reason.trim().length < 3) return setNotice('처리 사유를 3자 이상 입력해주세요.')
+    try {
+      setBusy(true); setNotice('')
+      await adminApi(`/admin/subscriptions/users/${userId}/${action}`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) })
+      setNotice('구독 상태를 변경했습니다. 처리 이력에서 확인해주세요.'); refresh()
+    } catch (caught) { setNotice(caught.message) } finally { setBusy(false) }
+  }
+  const refundSubscription = async (order) => {
+    if (busy || order.product_type !== 'subscription') return
+    const reason = window.prompt(`${order.user?.name || '회원'}의 ${Number(order.amount).toLocaleString('ko-KR')}원 구독 결제를 전액 환불하고 이용을 종료합니다. 처리 사유를 입력해주세요.`)
+    if (reason === null) return
+    if (reason.trim().length < 3) return setNotice('환불 사유를 3자 이상 입력해주세요.')
+    try {
+      setBusy(true); setNotice('')
+      await adminApi(`/admin/subscriptions/orders/${encodeURIComponent(order.id)}/refund`, { method: 'POST', body: JSON.stringify({ reason: reason.trim() }) })
+      setNotice('구독 결제를 환불하고 이용을 종료했습니다.'); refresh()
+    } catch (caught) { setNotice(caught.message) } finally { setBusy(false) }
+  }
 
   return <section className="admin-payments">
     <div className="payment-history-heading"><div><p className="admin-kicker">PAYMENTS & CREDITS</p><h2>결제·크레딧 관리</h2><p>구매·취소·환불·영수증과 회원별 크레딧을 관리합니다.</p></div><button type="button" className="admin-action" disabled={loading || busy} onClick={refresh}>새로고침</button></div>
@@ -84,6 +109,7 @@ export default function AdminPayments({ initialUserId = '' }) {
       {userError && <p className="admin-payment-error" role="alert">{userError}</p>}
       {usersLoading ? <p role="status">회원 목록을 불러오는 중…</p> : !userError && <><div className="admin-credit-user-list">{users.items.map((user) => <button type="button" key={user.id} className={`admin-credit-user${userId === user.id ? ' selected' : ''}`} onClick={() => selectUser(user.id)}><span><strong>{user.name || '회원'}</strong><small>{user.email}</small></span><strong>{formatPoints(user.balance)}</strong></button>)}{!users.items.length && <p>일치하는 회원이 없습니다.</p>}</div><PaymentPagination page={userPage} total={users.total} limit={users.limit} disabled={usersLoading} onChange={(value) => { setUserPage(value); setUsersLoading(true) }} /></>}
     </section>
+    {userId && !loading && !error && subscriptionInfo && <SubscriptionPanel subscription={subscriptionInfo.subscription} events={subscriptionInfo.events} admin busy={busy} onCancel={() => changeSubscription('cancel')} onResume={() => changeSubscription('resume')} />}
     <section className="dashboard-panel admin-credit-adjust"><h2>회원별 크레딧 지급·회수</h2>
       {!userId ? <p>위 목록에서 회원을 선택하면 잔액을 확인하고 지급·회수할 수 있습니다.</p> : loading ? <p role="status">선택한 회원 정보를 불러오는 중…</p> : selectedUser?.id === userId && !error ? <>
         <div className="admin-credit-selected"><div><strong>{selectedUser.name}</strong><p>{selectedUser.email}</p><small>회원번호 {selectedUser.id}</small></div><strong>보유 {formatPoints(selectedUser.balance)}</strong></div>
@@ -91,7 +117,7 @@ export default function AdminPayments({ initialUserId = '' }) {
       </> : <p>선택한 회원 정보를 확인할 수 없습니다. 새로고침 후 다시 시도해주세요.</p>}
     </section>
     <section className="dashboard-panel"><div className="payment-history-heading"><h2>{userId ? '선택 회원 결제내역' : '전체 회원 결제내역'}</h2><PaymentStatusFilter value={status} disabled={loading} onChange={(value) => { setStatus(value); setPage(1); setLoading(true) }} /></div>
-      {loading ? <p role="status">결제내역을 불러오는 중…</p> : !error && (orders.items.length ? <PaymentHistory orders={orders.items} showUser /> : <p className="payment-empty">해당 결제내역이 없습니다.</p>)}
+      {loading ? <p role="status">결제내역을 불러오는 중…</p> : !error && (orders.items.length ? <PaymentHistory orders={orders.items} showUser busy={busy ? 'admin-action' : ''} onRefund={(order) => { if (order.product_type === 'subscription') return refundSubscription(order) }} subscriptionOnlyRefund /> : <p className="payment-empty">해당 결제내역이 없습니다.</p>)}
       {!error && <PaymentPagination page={page} total={orders.total} limit={orders.limit} disabled={loading} onChange={(value) => { setPage(value); setLoading(true) }} />}
     </section>
     <section className="dashboard-panel"><h2>{userId ? '선택 회원' : '전체 회원'} 크레딧 처리 기록</h2><p>구매 적립·환불·관리자 지급·회수 내역입니다.</p>

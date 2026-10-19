@@ -56,6 +56,42 @@ balances. Only the service role can call the adjustment/refund database function
 Public deployment addresses are centralized in `frontend/src/deploymentConfig.js`.
 Stale local or unrelated project URLs fall back to the current deployed project.
 
+## Monthly subscriptions
+
+The shop defaults to a **1개월 이용권** using the same `requestPayment(CARD)`
+checkout as credits. This grants one calendar month after verified approval and
+never automatically charges again. Users can explicitly choose **자동갱신 구독**,
+which uses Toss `requestBillingAuth` to register a billing key and charge the first
+month. The separate registration window is required by Toss for automatic billing.
+
+The profile and administrator member/payment views show the billing mode, access
+state, paid period, cancellation reservation, last payment and recent events.
+Automatic subscriptions support end-of-period cancellation and cancellation
+withdrawal. A full refund of the latest linked subscription payment ends access
+immediately and stops renewal; older payments require separate review. Processor
+approval/cancellation is verified before DB settlement. Ambiguous payment results
+keep their durable idempotency record and can be checked with **결제 상태 확인**.
+
+After migrations and the API are deployed, run
+`node backend/supabase/configure-subscriptions.mjs` and redeploy the API to provision
+the private scheduler secret. The cron job `moa-subscription-renewals` runs every
+five minutes using pg_cron + pg_net and a Vault secret; it expires non-renewing
+subscriptions and processes due automatic renewals in batches of two. Each
+renewal uses a deterministic order id and a durable provider idempotency key.
+Definite card rejection records a failed order, `past_due` state and event in one
+transaction; it does not keep charging declined cards automatically. The user
+can register again or purchase a normal one-month pass. Billing keys are not
+readable by authenticated users through the Data API.
+
+Checks:
+
+- `npm.cmd --prefix backend test` (offline, provider mocks)
+- `node backend/test/subscription-integration.mjs --allow-remote-fixtures`
+  (real Supabase, isolated accounts, fixture approvals/refunds, no Toss calls)
+- `npx.cmd --yes --package=playwright -c "node backend/test/subscription-browser.mjs --allow-remote-fixtures"`
+  (opens real test-key checkout windows without submitting card data; activation
+  and refund approvals are explicit fixtures, with real DB/user/admin UI checks)
+
 Run `npm.cmd run dev:backend` to serve the `api` Edge Function locally. Local
 Edge Function serving requires Docker. Deploy the database migrations and API
 function with `npm.cmd --prefix backend run deploy`.

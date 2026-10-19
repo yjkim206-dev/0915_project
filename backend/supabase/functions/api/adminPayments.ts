@@ -1,5 +1,5 @@
 import type { SupabaseClient } from 'jsr:@supabase/supabase-js@2'
-import { orderFields, orderSummary, pagination, paymentStatuses, validUuid } from './paymentHistory.ts'
+import { orderFields, orderSummary, pagination, paymentStatuses, validUuid, subscriptionFields, subscriptionSummary } from './paymentHistory.ts'
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: {
   'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*',
@@ -44,7 +44,10 @@ export async function handleAdminPaymentRoutes(path: string, method: string, req
     const wallets = ids.length ? await db.from('credit_wallets').select('user_id,balance').in('user_id', ids) : { data: [], error: null }
     if (wallets.error) return fail(wallets.error.message, 500)
     const balances = new Map((wallets.data || []).map((row) => [row.user_id, row.balance]))
-    return json({ items: (data || []).map((row) => ({ ...row, balance: balances.get(row.id) || 0 })), total: count || 0, page, limit })
+    const subscriptions = ids.length ? await db.from('subscriptions').select(subscriptionFields).in('user_id', ids) : { data: [], error: null }
+    if (subscriptions.error) return fail(subscriptions.error.message, 500)
+    const states = new Map((subscriptions.data || []).map((row) => [row.user_id, subscriptionSummary(row)]))
+    return json({ items: (data || []).map((row) => ({ ...row, balance: balances.get(row.id) || 0, subscription: states.get(row.id) || null })), total: count || 0, page, limit })
   }
 
   if (path === '/admin/credits/transactions' && method === 'GET') {
