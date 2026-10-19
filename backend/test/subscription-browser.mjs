@@ -101,6 +101,16 @@ try {
     const button = kind === 'credits' ? checkout.locator('.shop-credit-card').first().getByRole('button') : checkout.getByRole('button', { name: kind === 'manual' ? '1개월 이용권 결제' : '자동갱신 카드 등록 및 첫 결제', exact: true })
     await button.click()
     await until(async () => checkout.frames().some((frame) => /tosspayments\.com/.test(frame.url())), kind + ' provider iframe')
+    await until(async () => {
+      for (const frame of checkout.frames().filter((frame) => /tosspayments\.com/.test(frame.url()))) {
+        const text = await frame.locator('body').innerText({ timeout: 1000 }).catch(() => '')
+        const visibleInput = await frame.locator('input:visible').count().catch(() => 0)
+        const cardChoice = await frame.getByText(/신한|삼성|현대|국민|카드번호|카드 번호/).first().isVisible().catch(() => false)
+        if (cardChoice || (kind === 'automatic' && visibleInput > 0 && /카드/.test(text))) return true
+      }
+      return false
+    }, kind + ' rendered provider controls')
+    await checkout.waitForTimeout(1500)
     await checkout.screenshot({ path: join(shots, 'checkout-' + kind + '.png'), fullPage: true })
     console.log(`PASS real Toss ${kind} checkout window opens without submitting a payment`)
     await checkoutCtx.close()
@@ -146,6 +156,7 @@ try {
   adminPage.once('dialog', (dialog) => dialog.accept('UI administrator refund'))
   await adminPage.getByRole('button', { name: '결제 취소·환불', exact: true }).click()
   await until(async () => (await ownApi('/payments/account', buyer)).subscription?.status === 'cancelled', 'admin refund entitlement')
+  await adminPage.locator('.subscription-panel').getByText('이용 종료', { exact: true }).waitFor()
   await adminPage.screenshot({ path: join(shots, 'admin-subscription-mobile.png'), fullPage: true })
   await page.reload(); await page.getByText('이용 종료', { exact: true }).first().waitFor()
   assert.deepEqual(errors, [])
