@@ -63,7 +63,7 @@ for (const path of ['/auth/login', '/auth/signup', '/admin/login']) {
     }))
     assert.equal(response.status, 500)
     assert.equal(response.headers.get('access-control-allow-origin'), '*')
-    assert.equal((await response.json()).message, 'Simulated auth outage')
+    assert.equal((await response.json()).message, '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.')
   })
 }
 
@@ -75,4 +75,11 @@ test('health check and CORS preflight remain available', async () => {
   const preflight = await handler(new Request('https://example.test/functions/v1/api/profile', { method: 'OPTIONS' }))
   assert.equal(preflight.status, 200)
   assert.equal(preflight.headers.get('access-control-allow-origin'), '*')
+})
+
+test('unsafe numeric resource ids are rejected before any database access', async () => {
+  for (const path of ['/posts/999999999999999999999999', '/posts/0/comments']) {
+    const response = await loadHandler()(new Request(`https://example.test/functions/v1/api${path}`))
+    assert.equal(response.status, 400)
+  }
 })

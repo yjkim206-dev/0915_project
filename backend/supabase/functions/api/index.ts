@@ -17,7 +17,7 @@ const auth = createClient(supabaseUrl, anonKey)
 
 const headers = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type', 'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS', 'Content-Type': 'application/json' }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers })
-const error = (message: string, status = 400) => json({ message }, status)
+const error = (message: string, status = 400) => json({ message: status === 500 ? '서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.' : message }, status)
 const bearer = (request: Request) => request.headers.get('authorization')?.replace(/^Bearer\s+/i, '') || ''
 const bodyOf = async (request: Request) => { try { return await request.json() } catch { return {} } }
 
@@ -249,12 +249,23 @@ async function handleView(id: number, request: Request) {
   return json({ views: post.views, counted: false })
 }
 
+async function readablePost(id: number, request: Request) {
+  const { data: post, error: readError } = await db.from('posts').select('id,author_id,is_hidden').eq('id', id).maybeSingle()
+  if (readError) throw readError
+  if (!post) return false
+  if (!post.is_hidden) return true
+  const user = await currentUser(request)
+  return Boolean(user && post.author_id === user.id)
+}
+
 async function handleReactions(id: number, method: string, request: Request) {
+  const authenticatedUser = method === 'POST' ? await requiredUser(request) : null
+  if (!(await readablePost(id, request))) return error('게시글을 찾을 수 없습니다.', 404)
   if (method === 'GET') {
     const { data, error: readError } = await db.from('post_reactions').select('reaction,user_id').eq('post_id', id); if (readError) return error(readError.message, 500)
     const user = await currentUser(request); const rows = data || []; return json({ likes: rows.filter((row) => row.reaction === 'like').length, dislikes: rows.filter((row) => row.reaction === 'dislike').length, reaction: user ? rows.find((row) => row.user_id === user.id)?.reaction || null : null })
   }
-  const user = await requiredUser(request); const input = await bodyOf(request); const next = input.reaction === 'like' || input.reaction === 'dislike' ? input.reaction : null; if (!next) return error('좋아요 또는 싫어요만 선택할 수 있습니다.')
+  const user = authenticatedUser!; const input = await bodyOf(request); const next = input.reaction === 'like' || input.reaction === 'dislike' ? input.reaction : null; if (!next) return error('좋아요 또는 싫어요만 선택할 수 있습니다.')
   const { data: existing } = await db.from('post_reactions').select('reaction').eq('post_id', id).eq('user_id', user.id).maybeSingle()
   if (existing?.reaction === next) await db.from('post_reactions').delete().eq('post_id', id).eq('user_id', user.id); else await db.from('post_reactions').upsert({ post_id: id, user_id: user.id, reaction: next }, { onConflict: 'post_id,user_id' })
   return handleReactions(id, 'GET', request)
@@ -262,6 +273,7 @@ async function handleReactions(id: number, method: string, request: Request) {
 
 async function handleComments(path: string, method: string, request: Request) {
   const postMatch = path.match(/^\/posts\/(\d+)\/comments$/); const commentMatch = path.match(/^\/comments\/(\d+)$/)
+  if (postMatch && (method === 'GET' || method === 'POST') && !(await readablePost(Number(postMatch[1]), request))) return error('게시글을 찾을 수 없습니다.', 404)
   if (postMatch && method === 'GET') { const { data, error: readError } = await db.from('comments').select('id,post_id,content,created_at,author_id,profiles:author_id(name)').eq('post_id', Number(postMatch[1])).eq('is_hidden', false).order('created_at', { ascending: true }); if (readError) return error(readError.message, 500); return json((data || []).map((item: any) => ({ ...item, author: item.profiles?.name || '알 수 없음' }))) }
   if (postMatch && method === 'POST') { const user = await requiredUser(request); const input = await bodyOf(request); const content = String(input.content || '').trim(); if (!content || content.length > 500) return error('댓글은 1자 이상 500자 이하로 작성해주세요.'); const { data, error: insertError } = await db.from('comments').insert({ post_id: Number(postMatch[1]), author_id: user.id, content }).select('id,post_id,content,created_at,author_id,profiles:author_id(name)').single(); if (insertError) return error(insertError.message, 500); return json({ ...data, author: data.profiles?.name || '알 수 없음' }, 201) }
   if (!commentMatch) return null
@@ -554,6 +566,8 @@ async function handler(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers })
   const url = new URL(request.url); const path = url.pathname.replace(/^\/functions\/v1\/api/, '').replace(/^\/api/, '') || '/'; const method = request.method
   try {
+    const resourceId = path.match(/^\/(?:posts|comments|notices|inquiries|reports|admin\/(?:posts|comments|notices|inquiries|reports))\/(\d+)(?:\/|$)/)
+    if (resourceId && (!Number.isSafeInteger(Number(resourceId[1])) || Number(resourceId[1]) < 1)) return error('올바른 항목 번호를 입력해주세요.', 400)
     if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running', admin_configured: Boolean(configuredAdminName && configuredAdminEmail && configuredAdminPassword) })
     if (path === '/internal/subscriptions/renew' && method === 'POST') return await runSubscriptionRenewals(request, db, tossSecretKey, subscriptionCronSecret)
     if (path.startsWith('/payments/subscriptions/') || path.startsWith('/admin/subscriptions/')) return await handleSubscriptionRoutes(path, method, request, db, requiredUser, adminUser, tossSecretKey)
