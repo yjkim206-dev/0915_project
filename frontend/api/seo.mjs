@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { API, SITE, DESCRIPTION, FAQS, PUBLIC_PATHS, escapeHtml as e, pageInfo, headHtml } from '../seo/site.mjs'
+import { API, SITE, DESCRIPTION, FAQS, escapeHtml as e, pageInfo, headHtml } from '../seo/site.mjs'
 
 // This renderer only calls unauthenticated public endpoints. Never use a
 // service-role key, cookies, or user-supplied upstream URLs to produce HTML.
@@ -28,8 +28,8 @@ async function publicData(path) {
   return data.filter(item => !item.is_hidden)
 }
 const isNotice = (post) => ['공지', '공지사항', 'notice'].includes(String(post.category || '').toLowerCase())
-async function notices() {
-  const [remote, posts] = await Promise.all([publicData('/notices'), publicData('/posts')])
+async function notices(existingPosts) {
+  const [remote, posts] = await Promise.all([publicData('/notices'), existingPosts || publicData('/posts')])
   return [...remote, ...posts.filter(isNotice).filter(post => !remote.some(item => String(item.id) === String(post.id)))]
 }
 function list(items, prefix) {
@@ -57,10 +57,11 @@ function send(res, status, body, type, cache = false) {
   res.setHeader('X-Content-Type-Options', 'nosniff')
   res.end(body)
 }
-async function sitemap() {
+async function contentSitemap() {
   // Fetch failure must not cache an incomplete sitemap that drops existing URLs.
-  const [posts, publishedNotices] = await Promise.all([publicData('/posts'), notices()])
-  const rows = PUBLIC_PATHS.map(path => ({ path }))
+  const [posts, remoteNotices] = await Promise.all([publicData('/posts'), publicData('/notices')])
+  const publishedNotices = [...remoteNotices, ...posts.filter(isNotice).filter(post => !remoteNotices.some(item => String(item.id) === String(post.id)))]
+  const rows = []
   for (const [items,prefix] of [[posts,'/board'],[publishedNotices,'/notices']]) for (const item of items) {
     if (!/^[1-9]\d*$/.test(String(item.id))) continue
     rows.push({ path: prefix + '/' + item.id, modified: item.updated_at || item.published_at || item.created_at })
@@ -77,7 +78,13 @@ export default async function handler(req, res) {
   const production = host === 'onboardproject.shop' || host === 'www.onboardproject.shop'
   if (path === '/sitemap.xml') {
     if (!production) res.setHeader('X-Robots-Tag','noindex, nofollow')
-    try { return send(res,200,await sitemap(),'application/xml',production) }
+    // Normally served directly from public/sitemap.xml. This fallback also has
+    // no dependency on database/API requests or the HTML shell.
+    return send(res,200,`<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>${SITE}/sitemap-pages.xml</loc></sitemap><sitemap><loc>${SITE}/sitemap-content.xml</loc></sitemap></sitemapindex>`,'application/xml',production)
+  }
+  if (path === '/sitemap-content.xml') {
+    if (!production) res.setHeader('X-Robots-Tag','noindex, nofollow')
+    try { return send(res,200,await contentSitemap(),'application/xml',production) }
     catch { res.setHeader('Retry-After','60'); return send(res,503,'Sitemap temporarily unavailable','text/plain') }
   }
   if (path === '/robots.txt') {

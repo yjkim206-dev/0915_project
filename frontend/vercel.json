@@ -14,7 +14,7 @@
   "rewrites": [
     { "source": "/", "destination": "/api/seo?path=/" },
     { "source": "/robots.txt", "destination": "/api/seo?path=/robots.txt" },
-    { "source": "/sitemap.xml", "destination": "/api/seo?path=/sitemap.xml" },
+    { "source": "/sitemap-content.xml", "destination": "/api/seo?path=/sitemap-content.xml" },
     { "source": "/about", "destination": "/api/seo?path=/about" },
     { "source": "/:path*", "destination": "/api/seo?path=/:path*" }
   ]

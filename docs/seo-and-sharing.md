@@ -16,7 +16,9 @@
 - WebSite, Organization, WebPage/CollectionPage/AboutPage, BreadcrumbList,
   공개 글의 DiscussionForumPosting/Article을 실제 내용으로 작성한다.
 - `/about`에 서비스 소개와 실제 이용 방법 FAQ를 공개한다.
-- `/sitemap.xml`은 공개 API로 현재 공개 글·공지와 기본 페이지를 조회한다.
+- `/sitemap.xml`은 DB/API에 의존하지 않는 정적 사이트맵 인덱스이다.
+  `/sitemap-pages.xml`은 기본 공개 페이지를 정적으로 제공하고,
+  `/sitemap-content.xml`은 공개 API로 현재 공개 글·공지를 조회한다.
   비공개·숨김 글, 관리자·회원·결제결과 페이지는 포함하지 않는다.
 - `/robots.txt`, `/llms.txt`로 공개 정보와 접근 범위를 안내한다.
   llms.txt는 보조 안내이며 검색 순위나 AI 인용을 보장하지 않는다.
