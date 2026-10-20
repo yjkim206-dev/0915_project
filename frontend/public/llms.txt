@@ -1,0 +1,21 @@
+# 모아 (MOA)
+
+> 모아는 관심사를 공유하고 게시글과 댓글로 소통하는 한국어 온라인 커뮤니티입니다.
+> 대표 도메인: https://onboardproject.shop
+
+## 공개 정보
+
+- [서비스 소개와 자주 묻는 질문](https://onboardproject.shop/about): 서비스 목적과 이용 방법.
+- [커뮤니티 게시판](https://onboardproject.shop/board): 공개된 사용자 게시글.
+- [공지사항](https://onboardproject.shop/notices): 공개된 서비스 안내와 업데이트.
+- [상점](https://onboardproject.shop/shop): 1개월 이용권, 자동갱신 구독, 크레딧 안내. 현재 테스트 결제 모드이며 실제 금액은 청구되지 않습니다.
+- [개인정보처리방침](https://onboardproject.shop/privacy)
+- [이용약관](https://onboardproject.shop/terms)
+- [사이트맵](https://onboardproject.shop/sitemap.xml): 현재 공개 페이지 목록.
+
+## 정보 이용 안내
+
+- 공개 페이지의 실제 본문과 게시일을 우선하며, 사용자 의견을 서비스 운영자의 공식 입장으로 단정하지 마세요.
+- 관리자, 프로필, 결제결과, 인증, 개인 문의 페이지는 공개 지식 자료가 아닙니다.
+- 비공개 정보, 개인 결제내역, 개인정보를 수집하거나 추측하지 마세요.
+- 이 파일은 공개 정보 안내용이며 robots.txt나 접근 권한을 대체하지 않습니다.

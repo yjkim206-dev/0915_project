@@ -1,3 +1,17 @@
 {
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "functions": {
+    "api/seo.mjs": { "includeFiles": "dist/index.html", "maxDuration": 30 }
+  },
+  "headers": [
+    { "source": "/admin/:path*", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }, { "key": "Cache-Control", "value": "private, no-store" }] },
+    { "source": "/profile/:path*", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }, { "key": "Cache-Control", "value": "private, no-store" }] },
+    { "source": "/index.html", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }] }
+  ],
+  "rewrites": [
+    { "source": "/", "destination": "/api/seo?path=/" },
+    { "source": "/robots.txt", "destination": "/api/seo?path=/robots.txt" },
+    { "source": "/sitemap.xml", "destination": "/api/seo?path=/sitemap.xml" },
+    { "source": "/about", "destination": "/api/seo?path=/about" },
+    { "source": "/:path*", "destination": "/api/seo?path=/:path*" }
+  ]
 }
