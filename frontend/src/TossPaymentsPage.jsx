@@ -5,6 +5,7 @@ import { SITE_URL } from './deploymentConfig.js'
 import { Link } from 'react-router-dom'
 import { subscriptionStatusName } from './subscriptionFormat.js'
 import './toss-payments.css'
+import './shop-categories.css'
 
 const clientKey = import.meta.env.VITE_TOSS_CLIENT_KEY
 
@@ -36,6 +37,8 @@ export default function TossPaymentsPage() {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [products, setProducts] = useState([])
+  const [categories, setCategories] = useState([])
+  const [selectedCategory, setSelectedCategory] = useState('all')
   const [account, setAccount] = useState(null)
   const [subscriptionMode, setSubscriptionMode] = useState('manual')
 
@@ -47,6 +50,7 @@ export default function TossPaymentsPage() {
   useEffect(() => {
     let active = true
     api('/shop/products').then((items) => { if (active) setProducts(items) }).catch((error) => { if (active) setNotice(`상품 정보를 불러오지 못했습니다: ${error.message}`) })
+    api('/shop/categories').then(items => { if (active) setCategories(items) }).catch(error => { if (active) setNotice(`카테고리를 불러오지 못했습니다: ${error.message}`) })
     refreshAccount()
     const processRedirect = async () => {
       const path = window.location.pathname
@@ -158,6 +162,8 @@ export default function TossPaymentsPage() {
 
   const credits = products.filter((product) => product.product_type === 'credits')
   const subscription = products.find((product) => product.product_type === 'subscription')
+  const visibleCategory = id => categories.some(category => category.id === id && (selectedCategory === 'all' || selectedCategory === id))
+  const contentCategories = categories.filter(category => category.category_type === 'content' && (selectedCategory === 'all' || selectedCategory === category.id))
 
   return <div className="shop-page">
     <div className="shop-content">
@@ -167,15 +173,17 @@ export default function TossPaymentsPage() {
       {account && <section className="shop-notice shop-account-summary"><strong>내 결제 정보</strong><span>보유 포인트: {Number(account.balance).toLocaleString('ko-KR')}P</span><span>구독 상태: {subscriptionStatusName(account.subscription)}</span>{account.subscription?.is_active && account.subscription.billing_mode === 'automatic' && !account.subscription.cancel_at_period_end && <button className="shop-button secondary" disabled={busy} onClick={cancelSubscription}>자동갱신 해지 예약</button>}<Link to="/profile/payments" className="text-link">내 구독·결제내역 보기 →</Link></section>}
       {!clientKey && <div className="shop-notice warning">결제 키가 설정되지 않았습니다. Vercel의 VITE_TOSS_CLIENT_KEY를 확인해 주세요.</div>}
 
+      <nav className="shop-category-tabs" aria-label="상점 카테고리"><button type="button" aria-pressed={selectedCategory === 'all'} onClick={() => setSelectedCategory('all')}>전체</button>{categories.map(category => <button type="button" key={category.id} aria-pressed={selectedCategory === category.id} onClick={() => setSelectedCategory(category.id)}>{category.name}</button>)}</nav>
       <div className="shop-purchase-options">
-      <section className="shop-section shop-option">
+      {visibleCategory(subscription?.category_id) && <section className="shop-section shop-option">
         <div className="shop-section-heading"><div><span className="shop-kicker">MONTHLY MEMBERSHIP</span><h2>월간 구독</h2><p>1개월 이용권과 자동갱신 구독 중 선택하세요.</p></div><span className="shop-pill">월간</span></div>
         <fieldset className="shop-subscription-mode" disabled={busy}><legend>구독 방식 선택</legend><label className={subscriptionMode === 'manual' ? 'selected' : ''}><input type="radio" name="subscription-mode" value="manual" checked={subscriptionMode === 'manual'} onChange={() => setSubscriptionMode('manual')} /><span><strong>1개월 이용권</strong><small>크레딧과 같은 결제창 · 자동 청구 없음</small></span></label><label className={subscriptionMode === 'automatic' ? 'selected' : ''}><input type="radio" name="subscription-mode" value="automatic" checked={subscriptionMode === 'automatic'} onChange={() => setSubscriptionMode('automatic')} /><span><strong>자동갱신 구독</strong><small>카드 등록 후 매월 자동 청구 · 해지 가능</small></span></label></fieldset>
         <article className="shop-subscription-card"><div className="shop-plan-copy"><span className="shop-plan-label">MOA PREMIUM</span><h3>{subscriptionMode === 'manual' ? '프리미엄 1개월 이용권' : '프리미엄 자동갱신 구독'}</h3><p>커뮤니티를 더 편리하게 이용할 수 있는 월간 플랜</p><ul><li>프리미엄 멤버십 1개월 이용</li><li>{subscriptionMode === 'manual' ? '이번 결제 한 번만 청구' : '등록한 카드로 매월 자동 결제'}</li><li>{subscriptionMode === 'manual' ? '기간 만료 시 자동 종료' : '프로필에서 자동갱신 해지 가능'}</li></ul></div><div className="shop-plan-price"><strong>{subscription ? money(subscription.amount) : '불러오는 중'}</strong><small>{subscriptionMode === 'manual' ? '1개월 이용 · 1회 결제' : '매월 1회 자동갱신'}</small><button className="shop-button primary" disabled={busy || !subscription || account?.subscription?.is_active} onClick={subscribe}>{busy ? '처리 중…' : account?.subscription?.is_active ? '현재 구독 이용 중' : subscriptionMode === 'manual' ? '1개월 이용권 결제' : '자동갱신 카드 등록 및 첫 결제'}</button><small className="shop-legal-note">{subscriptionMode === 'manual' ? '일반 카드결제창에서 결제 후 1개월 이용합니다.' : '자동 청구를 위한 별도 카드등록창이 열립니다.'}</small></div></article>
-      </section>
-      <section className="shop-section shop-option"><div className="shop-section-heading"><div><span className="shop-kicker">CREDIT POINTS</span><h2>크레딧 충전</h2><p>필요한 만큼 포인트를 충전해 보세요.</p></div><span className="shop-pill">1회 결제</span></div>
-        <div className="shop-credit-grid">{credits.map((item, index) => <article className={`shop-credit-card${index === credits.length - 1 ? ' featured' : ''}`} key={item.id}><div className="shop-credit-icon">P</div><span className="shop-credit-label">포인트 충전</span><h3>{Number(item.credits).toLocaleString('ko-KR')}P</h3><p>{item.name}</p><div className="shop-credit-price">{money(item.amount)}</div><button className="shop-button secondary" disabled={busy} onClick={() => buyCredits(item)}>{busy ? '처리 중…' : '결제하고 포인트 충전'}</button></article>)}</div>
-      </section></div>
+      </section>}
+      {credits.some(item => visibleCategory(item.category_id)) && <section className="shop-section shop-option"><div className="shop-section-heading"><div><span className="shop-kicker">CREDIT POINTS</span><h2>크레딧 충전</h2><p>필요한 만큼 포인트를 충전해 보세요.</p></div><span className="shop-pill">1회 결제</span></div>
+        <div className="shop-credit-grid">{credits.filter(item => visibleCategory(item.category_id)).map((item, index) => <article className={`shop-credit-card${index === credits.length - 1 ? ' featured' : ''}`} key={item.id}><div className="shop-credit-icon">P</div><span className="shop-credit-label">포인트 충전</span><h3>{Number(item.credits).toLocaleString('ko-KR')}P</h3><p>{item.name}</p><div className="shop-credit-price">{money(item.amount)}</div><button className="shop-button secondary" disabled={busy} onClick={() => buyCredits(item)}>{busy ? '처리 중…' : '결제하고 포인트 충전'}</button></article>)}</div>
+      </section>}</div>
+      {contentCategories.length > 0 && <section className="shop-content-categories" aria-label="디지털 콘텐츠 분류">{contentCategories.map(category => <article key={category.id} className="shop-content-category"><span className="shop-kicker">DIGITAL CONTENTS</span><h2>{category.name}</h2><p>{category.description}</p><small>아직 등록된 상품이 없습니다.</small></article>)}</section>}
 
       <aside className="shop-footer-note"><strong>결제·구독 안내</strong><p>1개월 이용권은 한 번만 결제되며 종료일에 자동으로 만료됩니다. 자동갱신 구독은 별도 카드등록 후 매월 결제되고, 프로필에서 해지 예약할 수 있습니다. 승인 완료된 결제만 이용권이 활성화됩니다. 최근 구독 결제를 전액 환불하면 이용이 즉시 종료됩니다.</p></aside>
     </div>

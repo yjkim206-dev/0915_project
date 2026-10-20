@@ -27,7 +27,7 @@ export async function handlePaymentRoutes(
   tossSecret: string,
 ) {
   if (path === '/shop/products' && method === 'GET') {
-    const { data, error } = await db.from('shop_products').select('id,product_type,name,amount,credits,billing_interval').eq('is_active', true).order('amount')
+    const { data, error } = await db.from('shop_products').select('id,product_type,name,amount,credits,billing_interval,category_id').eq('is_active', true).order('amount')
     if (error) return fail(error.message, 500)
     return json(data || [])
   }

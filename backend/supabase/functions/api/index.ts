@@ -5,6 +5,7 @@ import { handleSubscriptionRoutes, runSubscriptionRenewals } from './subscriptio
 import { subscriptionFields, subscriptionSummary } from './paymentHistory.ts'
 import { handleBackups } from './backups.ts'
 import { handleAttachments, saveAttachedPost } from './attachments.ts'
+import { handleShopCategories } from './shopCategories.ts'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -567,6 +568,7 @@ async function handler(request: Request) {
     const resourceId = path.match(/^\/(?:posts|comments|notices|inquiries|reports|admin\/(?:posts|comments|notices|inquiries|reports))\/(\d+)(?:\/|$)/)
     if (resourceId && (!Number.isSafeInteger(Number(resourceId[1])) || Number(resourceId[1]) < 1)) return error('올바른 항목 번호를 입력해주세요.', 400)
     if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running', admin_configured: Boolean(configuredAdminName && configuredAdminEmail && configuredAdminPassword) })
+    if (path === '/shop/categories' || path.startsWith('/admin/shop/categories')) return await handleShopCategories(path, method, request, db, adminUser)
     if (path.startsWith('/admin/backups') || path === '/internal/backups/tick') return await handleBackups(path, method, request, db, adminUser, subscriptionCronSecret)
     const attachmentResult = await handleAttachments(path, method, request, db, requiredUser, readablePost, subscriptionCronSecret); if (attachmentResult) return attachmentResult
     if (path === '/internal/subscriptions/renew' && method === 'POST') return await runSubscriptionRenewals(request, db, tossSecretKey, subscriptionCronSecret)
