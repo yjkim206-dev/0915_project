@@ -31,11 +31,14 @@
   robots.txt로 차단하면 검색엔진이 noindex를 보지 못해 URL만 노출될 수 있기 때문이다.
 - 비공개 응답은 `private,no-store`; 기존 로그인과 API 관리자 권한 검사를 유지한다.
 - SEO 렌더러는 인증 없는 공개 API만 사용하고 쿠키·관리자 키를 사용하지 않는다.
-- 운영 도메인이 아닌 미리보기·기존 vercel.app 주소는 noindex 처리한다.
+- 미리보기는 noindex 처리하며, 기존 `0915-project-ruby.vercel.app` 주소는
+  같은 경로의 대표 도메인으로 영구 이동한다.
 
 ## 배포·운영
 
-`npm run build`로 정적 자산을 만들고 Vercel에서 `dist/index.html`을 함수에 포함한다.
+`npm run build`로 정적 자산을 만들고 첫 화면에는 정적 본문과 JSON-LD를 포함한다.
+Vercel 함수는 빌드된 HTML을 읽으며, 배포 작업 디렉터리 차이로 파일을 찾지 못하면
+고정된 운영 도메인의 정적 `/index.html`을 읽는다. 요청자가 전달한 호스트는 사용하지 않는다.
 동적 공개 HTML과 사이트맵 캐시는 60초이며 비공개 응답은 캐시하지 않는다.
 이번 변경에는 Supabase DB 변경이나 신규 서버 시크릿이 필요하지 않다.
 

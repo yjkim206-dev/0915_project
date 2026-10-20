@@ -3,10 +3,13 @@
     "api/seo.mjs": { "includeFiles": "dist/index.html", "maxDuration": 30 }
   },
   "headers": [
-    { "source": "/:path*", "has": [{ "type": "host", "value": ".*\\.vercel\\.app" }], "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }] },
+    { "source": "/:path*", "has": [{ "type": "host", "value": "0915-project-ruby.vercel.app" }], "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }] },
     { "source": "/admin/:path*", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }, { "key": "Cache-Control", "value": "private, no-store" }] },
     { "source": "/profile/:path*", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }, { "key": "Cache-Control", "value": "private, no-store" }] },
     { "source": "/index.html", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }] }
+  ],
+  "redirects": [
+    { "source": "/:path*", "has": [{ "type": "host", "value": "0915-project-ruby.vercel.app" }], "destination": "https://onboardproject.shop/:path*", "permanent": true }
   ],
   "rewrites": [
     { "source": "/", "destination": "/api/seo?path=/" },
