@@ -4,7 +4,22 @@ import { API, SITE, DESCRIPTION, FAQS, PUBLIC_PATHS, escapeHtml as e, pageInfo, 
 
 // This renderer only calls unauthenticated public endpoints. Never use a
 // service-role key, cookies, or user-supplied upstream URLs to produce HTML.
-const template = () => readFileSync(join(process.cwd(), 'dist/index.html'), 'utf8')
+let shellCache
+async function template() {
+  if (shellCache) return shellCache
+  // Monorepo function working directories can differ from the Vite project root.
+  for (const file of [new URL('../dist/index.html', import.meta.url), join(process.cwd(),'dist/index.html'), join(process.cwd(),'frontend/dist/index.html')]) {
+    try { shellCache = readFileSync(file,'utf8'); return shellCache } catch { /* Try the next deployment layout. */ }
+  }
+  // /index.html is a static asset, never rewritten to this function. Pin the
+  // origin so user headers/parameters cannot redirect this request elsewhere.
+  const response = await fetch(SITE + '/index.html', { signal:AbortSignal.timeout(8000) })
+  if (!response.ok) throw new Error('HTML shell unavailable')
+  const html = await response.text()
+  if (!html.includes('<!--seo:start-->') || !html.includes('/assets/')) throw new Error('Invalid HTML shell')
+  shellCache = html
+  return shellCache
+}
 async function publicData(path) {
   const response = await fetch(API + path, { signal: AbortSignal.timeout(8000), headers: { Accept: 'application/json' } })
   if (!response.ok) throw new Error('Public content unavailable')
@@ -95,9 +110,9 @@ export default async function handler(req, res) {
   res.setHeader('X-Robots-Tag',info.indexable ? 'index, follow, max-image-preview:large' : 'noindex, nofollow, noarchive, nosnippet')
   let html
   try {
-    html = template().replace(/<!--seo:start-->[\s\S]*?<!--seo:end-->/, `<!--seo:start-->${headHtml(path,info)}<!--seo:end-->`)
-      .replace('<div id="root"></div>', `<div id="root">${info.indexable || status !== 200 ? documentBody(path,info,items) : ''}</div>`)
-  } catch { return send(res,503,'Page temporarily unavailable','text/plain') }
+    html = (await template()).replace(/<!--seo:start-->[\s\S]*?<!--seo:end-->/, `<!--seo:start-->${headHtml(path,info)}<!--seo:end-->`)
+      .replace(/<div id="root">[\s\S]*?<\/div><!--app-shell:end-->/, `<div id="root">${info.indexable || status !== 200 ? documentBody(path,info,items) : ''}</div><!--app-shell:end-->`)
+  } catch { res.setHeader('X-Robots-Tag','noindex, nofollow'); return send(res,503,'Page temporarily unavailable','text/plain') }
   if (req.method === 'HEAD') html = ''
   return send(res,status,html,'text/html',info.indexable && status === 200)
 }

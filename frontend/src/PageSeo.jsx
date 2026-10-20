@@ -13,7 +13,7 @@ export default function PageSeo({ posts }) {
       const info = pageInfo(path,item)
       if (window.location.origin !== SITE && window.location.hostname !== 'www.onboardproject.shop') info.indexable = false
       // Replace only our managed metadata, leaving icons and unrelated head tags.
-      document.head.querySelectorAll('[data-site-seo],title,meta[name="description"],meta[name="robots"],link[rel="canonical"],meta[property^="og:"],meta[name^="twitter:"]').forEach(node => node.remove())
+      document.head.querySelectorAll('[data-site-seo],title,meta[name="description"],meta[name="robots"],link[rel="canonical"],meta[property^="og:"],meta[name^="twitter:"],script[type="application/ld+json"]').forEach(node => node.remove())
       const fragment = document.createRange().createContextualFragment(headHtml(path,info))
       document.head.appendChild(fragment)
     }

@@ -3,6 +3,7 @@
     "api/seo.mjs": { "includeFiles": "dist/index.html", "maxDuration": 30 }
   },
   "headers": [
+    { "source": "/:path*", "has": [{ "type": "host", "value": ".*\\.vercel\\.app" }], "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow" }] },
     { "source": "/admin/:path*", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }, { "key": "Cache-Control", "value": "private, no-store" }] },
     { "source": "/profile/:path*", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive, nosnippet" }, { "key": "Cache-Control", "value": "private, no-store" }] },
     { "source": "/index.html", "headers": [{ "key": "X-Robots-Tag", "value": "noindex, follow" }] }
