@@ -3,6 +3,8 @@ import { handlePaymentRoutes } from './payments.ts'
 import { handleAdminPaymentRoutes } from './adminPayments.ts'
 import { handleSubscriptionRoutes, runSubscriptionRenewals } from './subscriptions.ts'
 import { subscriptionFields, subscriptionSummary } from './paymentHistory.ts'
+import { handleBackups } from './backups.ts'
+import { handleAttachments, saveAttachedPost } from './attachments.ts'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL')!
 const anonKey = Deno.env.get('SUPABASE_ANON_KEY')!
@@ -200,11 +202,8 @@ async function handlePosts(path: string, method: string, request: Request) {
   if (path === '/posts' && method === 'GET') return json(await listPosts())
   const match = path.match(/^\/posts\/(\d+)$/)
   if (path === '/posts' && method === 'POST') {
-    const user = await requiredUser(request); const input = await bodyOf(request); const title = String(input.title || '').trim(); const content = String(input.content || '').trim()
-    if (!title || !content) return error('제목과 내용을 입력해주세요.')
-    const { data, error: insertError } = await db.from('posts').insert({ title, content, category: String(input.category || '자유').trim() || '자유', author_id: user.id }).select('*, profiles:author_id(name)').single()
-    if (insertError) return error(insertError.message, 500)
-    return json({ ...data, author: data.profiles?.name || user.user_metadata?.name || '알 수 없음', likes: 0, dislikes: 0 }, 201)
+    const user = await requiredUser(request); const input = await bodyOf(request)
+    return await saveAttachedPost(db, user, input, null)
   }
   if (!match) return null
   const id = Number(match[1])
@@ -221,8 +220,7 @@ async function handlePosts(path: string, method: string, request: Request) {
   if (method === 'PUT') {
     const user = await requiredUser(request); const input = await bodyOf(request); const { data: post } = await db.from('posts').select('author_id').eq('id', id).single()
     if (!post) return error('게시글을 찾을 수 없습니다.', 404); if (post.author_id !== user.id) return error('작성자만 게시글을 수정할 수 있습니다.', 403)
-    const { data, error: updateError } = await db.from('posts').update({ title: String(input.title || '').trim(), content: String(input.content || '').trim(), category: String(input.category || '자유').trim() || '자유' }).eq('id', id).select().single()
-    if (updateError) return error(updateError.message, 500); return json(data)
+    return await saveAttachedPost(db, user, input, id)
   }
   if (method === 'DELETE') {
     const user = await requiredUser(request); const { data: post } = await db.from('posts').select('author_id').eq('id', id).single()
@@ -569,6 +567,8 @@ async function handler(request: Request) {
     const resourceId = path.match(/^\/(?:posts|comments|notices|inquiries|reports|admin\/(?:posts|comments|notices|inquiries|reports))\/(\d+)(?:\/|$)/)
     if (resourceId && (!Number.isSafeInteger(Number(resourceId[1])) || Number(resourceId[1]) < 1)) return error('올바른 항목 번호를 입력해주세요.', 400)
     if (path === '/health' && method === 'GET') return json({ status: 'ok', message: 'Backend server is running', admin_configured: Boolean(configuredAdminName && configuredAdminEmail && configuredAdminPassword) })
+    if (path.startsWith('/admin/backups') || path === '/internal/backups/tick') return await handleBackups(path, method, request, db, adminUser, subscriptionCronSecret)
+    const attachmentResult = await handleAttachments(path, method, request, db, requiredUser, readablePost, subscriptionCronSecret); if (attachmentResult) return attachmentResult
     if (path === '/internal/subscriptions/renew' && method === 'POST') return await runSubscriptionRenewals(request, db, tossSecretKey, subscriptionCronSecret)
     if (path.startsWith('/payments/subscriptions/') || path.startsWith('/admin/subscriptions/')) return await handleSubscriptionRoutes(path, method, request, db, requiredUser, adminUser, tossSecretKey)
     if (path === '/shop/products' || path.startsWith('/payments/')) {
